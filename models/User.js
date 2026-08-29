@@ -1,6 +1,63 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 
+const addressSchema = new mongoose.Schema(
+  {
+    fullName: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    phone: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    street: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    apartment: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    city: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    state: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    postalCode: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    country: {
+      type: String,
+      default: 'India',
+      trim: true,
+    },
+    addressType: {
+      type: String,
+      enum: ['home', 'work', 'other'],
+      default: 'home',
+    },
+    isDefault: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
 const userSchema = new mongoose.Schema(
   {
     name: {
@@ -39,6 +96,7 @@ const userSchema = new mongoose.Schema(
     otpExpiresAt: {
       type: Date,
     },
+    addresses: [addressSchema],
   },
   {
     timestamps: true,

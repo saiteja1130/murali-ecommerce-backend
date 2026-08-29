@@ -2,6 +2,7 @@ import express from 'express';
 import {
   getProducts,
   getProductById,
+  getProductFacets,
   createProduct,
   updateProduct,
   toggleStockAvailability,
@@ -15,6 +16,7 @@ const router = express.Router();
 
 // Public routes for storefront & admin reading
 router.get('/', getProducts);
+router.get('/facets', getProductFacets);
 router.get('/:id', getProductById);
 
 // Admin protected routes for creating/modifying products (using FormData & Multer)

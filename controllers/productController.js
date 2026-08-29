@@ -34,7 +34,21 @@ export const getProducts = async (req, res) => {
     const limit = parseInt(req.query.limit, 10) || 12;
     const skip = (page - 1) * limit;
 
-    const { search, category, stockStatus, sort, includeArchived } = req.query;
+    const {
+      search,
+      category,
+      categories,
+      minPrice,
+      maxPrice,
+      color,
+      colors,
+      size,
+      sizes,
+      stockStatus,
+      inStockOnly,
+      sort,
+      includeArchived,
+    } = req.query;
 
     const query = {};
 
@@ -43,7 +57,7 @@ export const getProducts = async (req, res) => {
       query.isDeleted = { $ne: true };
     }
 
-    // Search filter
+    // Search filter across name, SKU, description
     if (search) {
       query.$or = [
         { name: { $regex: search, $options: 'i' } },
@@ -52,41 +66,97 @@ export const getProducts = async (req, res) => {
       ];
     }
 
-    // Category filter (support ID or Category slug/name lookup)
-    if (category && category !== 'all' && category !== 'All') {
-      if (category.match(/^[0-9a-fA-F]{24}$/)) {
-        query.category = category;
-      } else {
-        const matchedCategory = await Category.findOne({
+    // Category filter (supports ID, single slug, comma-separated list, or array)
+    const targetCategory = category || categories;
+    if (targetCategory && targetCategory !== 'all' && targetCategory !== 'All') {
+      const catList = Array.isArray(targetCategory)
+        ? targetCategory
+        : targetCategory.split(',').map((c) => c.trim()).filter(Boolean);
+
+      const objectIds = [];
+      const slugs = [];
+
+      for (const item of catList) {
+        if (item.match(/^[0-9a-fA-F]{24}$/)) {
+          objectIds.push(item);
+        } else {
+          slugs.push(item);
+        }
+      }
+
+      if (slugs.length > 0) {
+        const matchedCategories = await Category.find({
           $or: [
-            { slug: { $regex: `^${category}$`, $options: 'i' } },
-            { name: { $regex: `^${category}$`, $options: 'i' } },
+            { slug: { $in: slugs.map((s) => new RegExp(`^${s}$`, 'i')) } },
+            { name: { $in: slugs.map((s) => new RegExp(`^${s}$`, 'i')) } },
           ],
         });
-        if (matchedCategory) {
-          query.category = matchedCategory._id;
-        }
+        matchedCategories.forEach((cat) => objectIds.push(cat._id));
+      }
+
+      if (objectIds.length > 0) {
+        query.category = { $in: objectIds };
+      }
+    }
+
+    // Price range filtering (minPrice & maxPrice)
+    if (minPrice !== undefined || maxPrice !== undefined) {
+      query.price = {};
+      if (minPrice !== undefined && minPrice !== '') {
+        query.price.$gte = Number(minPrice);
+      }
+      if (maxPrice !== undefined && maxPrice !== '') {
+        query.price.$lte = Number(maxPrice);
+      }
+    }
+
+    // Color variant filtering (checks variants.color or variants.colorHex)
+    const targetColors = color || colors;
+    if (targetColors && targetColors !== 'all') {
+      const colorList = Array.isArray(targetColors)
+        ? targetColors
+        : targetColors.split(',').map((c) => c.trim()).filter(Boolean);
+
+      if (colorList.length > 0) {
+        query['variants.color'] = {
+          $in: colorList.map((c) => new RegExp(`^${c}$`, 'i')),
+        };
+      }
+    }
+
+    // Size variant filtering (checks variants.size)
+    const targetSizes = size || sizes;
+    if (targetSizes && targetSizes !== 'all') {
+      const sizeList = Array.isArray(targetSizes)
+        ? targetSizes
+        : targetSizes.split(',').map((s) => s.trim()).filter(Boolean);
+
+      if (sizeList.length > 0) {
+        query['variants.size'] = {
+          $in: sizeList.map((s) => new RegExp(`^${s}$`, 'i')),
+        };
       }
     }
 
     // Stock availability filter
-    if (stockStatus === 'in_stock') {
+    if (inStockOnly === 'true' || stockStatus === 'in_stock') {
       query.isStockAvailable = true;
     } else if (stockStatus === 'out_of_stock') {
       query.isStockAvailable = false;
     }
 
-    // Sort order
+    // Sort order mapping
     let sortObj = { createdAt: -1 };
     if (sort === 'price_asc') sortObj = { price: 1 };
     else if (sort === 'price_desc') sortObj = { price: -1 };
     else if (sort === 'name_asc') sortObj = { name: 1 };
     else if (sort === 'name_desc') sortObj = { name: -1 };
     else if (sort === 'oldest') sortObj = { createdAt: 1 };
+    else if (sort === 'newest') sortObj = { createdAt: -1 };
 
     const total = await Product.countDocuments(query);
     const products = await Product.find(query)
-      .populate('category', 'name slug')
+      .populate('category', 'name slug image description')
       .sort(sortObj)
       .skip(skip)
       .limit(limit);
@@ -102,6 +172,75 @@ export const getProducts = async (req, res) => {
   } catch (error) {
     console.error('Error fetching products:', error);
     res.status(500).json({ status: false, message: 'Server Error: Failed to fetch products' });
+  }
+};
+
+export const getProductFacets = async (req, res) => {
+  try {
+    const categories = await Category.find({}).sort({ order: 1 });
+    const products = await Product.find({ isDeleted: { $ne: true } }).select('category price variants isStockAvailable');
+
+    let minPrice = 0;
+    let maxPrice = 1000;
+    const colorsMap = new Map();
+    const sizesSet = new Set();
+    const categoryCountMap = {};
+
+    categories.forEach((cat) => {
+      categoryCountMap[cat._id.toString()] = 0;
+    });
+
+    if (products.length > 0) {
+      minPrice = Math.min(...products.map((p) => p.price || 0));
+      maxPrice = Math.max(...products.map((p) => p.price || 0));
+
+      products.forEach((prod) => {
+        const catId = prod.category?.toString();
+        if (catId && categoryCountMap[catId] !== undefined) {
+          categoryCountMap[catId]++;
+        }
+
+        if (Array.isArray(prod.variants)) {
+          prod.variants.forEach((v) => {
+            if (v.color) {
+              const name = v.color.trim();
+              const hex = v.colorHex || '#1A1A1A';
+              if (!colorsMap.has(name.toLowerCase())) {
+                colorsMap.set(name.toLowerCase(), { name, hex });
+              }
+            }
+            if (v.size) {
+              sizesSet.add(v.size.trim());
+            }
+          });
+        }
+      });
+    }
+
+    const categoriesWithCount = categories.map((cat) => ({
+      id: cat._id,
+      name: cat.name,
+      slug: cat.slug,
+      image: cat.image,
+      itemCount: categoryCountMap[cat._id.toString()] || 0,
+    }));
+
+    res.status(200).json({
+      status: true,
+      data: {
+        totalProducts: products.length,
+        priceRange: {
+          min: Math.floor(minPrice),
+          max: Math.ceil(maxPrice) || 1000,
+        },
+        colors: Array.from(colorsMap.values()),
+        sizes: Array.from(sizesSet),
+        categories: categoriesWithCount,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching product facets:', error);
+    res.status(500).json({ status: false, message: 'Server Error: Failed to fetch facets' });
   }
 };
 
