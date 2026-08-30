@@ -1,5 +1,6 @@
 import Product from '../models/Product.js';
 import Category from '../models/Category.js';
+import MainCategory from '../models/MainCategory.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -36,6 +37,7 @@ export const getProducts = async (req, res) => {
 
     const {
       search,
+      mainCategory,
       category,
       categories,
       minPrice,
@@ -55,6 +57,18 @@ export const getProducts = async (req, res) => {
     // Soft delete filter
     if (includeArchived !== 'true') {
       query.isDeleted = { $ne: true };
+    }
+
+    // Main Category filter
+    if (mainCategory && mainCategory !== 'all' && mainCategory !== 'All') {
+      if (mainCategory.match(/^[0-9a-fA-F]{24}$/)) {
+        query.mainCategory = mainCategory;
+      } else {
+        const foundMain = await MainCategory.findOne({ slug: mainCategory.toLowerCase() });
+        if (foundMain) {
+          query.mainCategory = foundMain._id;
+        }
+      }
     }
 
     // Search filter across name, SKU, description
@@ -156,7 +170,8 @@ export const getProducts = async (req, res) => {
 
     const total = await Product.countDocuments(query);
     const products = await Product.find(query)
-      .populate('category', 'name slug image description')
+      .populate('category', 'name slug image description mainCategory')
+      .populate('mainCategory', 'name slug image')
       .sort(sortObj)
       .skip(skip)
       .limit(limit);
@@ -250,9 +265,13 @@ export const getProductById = async (req, res) => {
     let product;
 
     if (id.match(/^[0-9a-fA-F]{24}$/)) {
-      product = await Product.findById(id).populate('category', 'name slug');
+      product = await Product.findById(id)
+        .populate('category', 'name slug mainCategory')
+        .populate('mainCategory', 'name slug image');
     } else {
-      product = await Product.findOne({ slug: id }).populate('category', 'name slug');
+      product = await Product.findOne({ slug: id })
+        .populate('category', 'name slug mainCategory')
+        .populate('mainCategory', 'name slug image');
     }
 
     if (!product || (product.isDeleted && req.query.includeArchived !== 'true')) {
@@ -318,11 +337,21 @@ export const createProduct = async (req, res) => {
 
     const generatedSlug = slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 
+    // Derive mainCategory from category if not explicitly provided
+    let derivedMainCat = req.body.mainCategory || null;
+    if (!derivedMainCat && category) {
+      const catDoc = await Category.findById(category);
+      if (catDoc && catDoc.mainCategory) {
+        derivedMainCat = catDoc.mainCategory;
+      }
+    }
+
     const product = await Product.create({
       name,
       slug: generatedSlug,
       sku: (sku || `SKU-${Date.now().toString().slice(-6)}`).toUpperCase(),
       category,
+      mainCategory: derivedMainCat,
       price: Number(price),
       originalPrice: originalPrice ? Number(originalPrice) : null,
       description: description || '',
@@ -335,7 +364,9 @@ export const createProduct = async (req, res) => {
       dimensions: dimensions || '',
     });
 
-    const populatedProduct = await Product.findById(product._id).populate('category', 'name slug');
+    const populatedProduct = await Product.findById(product._id)
+      .populate('category', 'name slug mainCategory')
+      .populate('mainCategory', 'name slug image');
 
     res.status(201).json({
       status: true,
@@ -376,9 +407,18 @@ export const updateProduct = async (req, res) => {
 
     const updateData = {};
     if (name !== undefined) updateData.name = name;
-    if (slug !== undefined) updateData.slug = slug;
-    if (sku !== undefined) updateData.sku = sku.toUpperCase();
-    if (category !== undefined) updateData.category = category;
+    if (category !== undefined) {
+      updateData.category = category;
+      if (req.body.mainCategory === undefined) {
+        const catDoc = await Category.findById(category);
+        if (catDoc && catDoc.mainCategory) {
+          updateData.mainCategory = catDoc.mainCategory;
+        }
+      }
+    }
+    if (req.body.mainCategory !== undefined) {
+      updateData.mainCategory = req.body.mainCategory;
+    }
     if (price !== undefined) updateData.price = Number(price);
     if (originalPrice !== undefined) updateData.originalPrice = originalPrice ? Number(originalPrice) : null;
     if (description !== undefined) updateData.description = description;
@@ -429,7 +469,9 @@ export const updateProduct = async (req, res) => {
     const updatedProduct = await Product.findByIdAndUpdate(req.params.id, updateData, {
       new: true,
       runValidators: true,
-    }).populate('category', 'name slug');
+    })
+      .populate('category', 'name slug mainCategory')
+      .populate('mainCategory', 'name slug image');
 
     res.status(200).json({
       status: true,

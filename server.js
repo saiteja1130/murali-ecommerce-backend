@@ -6,10 +6,14 @@ import path from 'path';
 
 // Route Imports
 import authRoutes from './routes/authRoutes.js';
+import mainCategoryRoutes from './routes/mainCategoryRoutes.js';
 import categoryRoutes from './routes/categoryRoutes.js';
 import productRoutes from './routes/productRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import heroRoutes from './routes/heroRoutes.js';
+import cartRoutes from './routes/cartRoutes.js';
+import settingsRoutes from './routes/settingsRoutes.js';
+import wishlistRoutes from './routes/wishlistRoutes.js';
 
 dotenv.config();
 
@@ -25,10 +29,14 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // Mount Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/cart', cartRoutes);
+app.use('/api/wishlist', wishlistRoutes);
+app.use('/api/main-categories', mainCategoryRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/hero', heroRoutes);
+app.use('/api/settings', settingsRoutes);
 
 app.get('/', (req, res) => {
   res.json({

@@ -36,6 +36,11 @@ const productSchema = new mongoose.Schema(
       ref: 'Category',
       required: [true, 'Please select a category'],
     },
+    mainCategory: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'MainCategory',
+      index: true,
+    },
     price: {
       type: Number,
       required: [true, 'Please provide a retail price'],

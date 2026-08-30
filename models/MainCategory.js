@@ -1,25 +1,19 @@
 import mongoose from 'mongoose';
 
-const categorySchema = new mongoose.Schema(
+const mainCategorySchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: [true, 'Please provide a category name'],
+      required: [true, 'Please provide a main category name'],
       trim: true,
       unique: true,
     },
     slug: {
       type: String,
-      required: [true, 'Please provide a category slug'],
+      required: [true, 'Please provide a main category slug'],
       trim: true,
       unique: true,
       lowercase: true,
-    },
-    mainCategory: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'MainCategory',
-      required: [true, 'Please select a parent main category'],
-      index: true,
     },
     description: {
       type: String,
@@ -30,7 +24,7 @@ const categorySchema = new mongoose.Schema(
       type: String,
       default: '',
     },
-    isFeatured: {
+    isActive: {
       type: Boolean,
       default: true,
     },
@@ -44,7 +38,5 @@ const categorySchema = new mongoose.Schema(
   }
 );
 
-categorySchema.index({ mainCategory: 1, order: 1 });
-
-const Category = mongoose.model('Category', categorySchema);
-export default Category;
+const MainCategory = mongoose.model('MainCategory', mainCategorySchema);
+export default MainCategory;

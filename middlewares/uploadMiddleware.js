@@ -41,6 +41,7 @@ const createUploadMiddleware = (folderName) => {
   });
 };
 
+export const uploadMainCategoryImages = createUploadMiddleware('main-categories');
 export const uploadCategoryImages = createUploadMiddleware('categories');
 export const uploadProductImages = createUploadMiddleware('products');
 export const uploadUserAvatars = createUploadMiddleware('avatars');
