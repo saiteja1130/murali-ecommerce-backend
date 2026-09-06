@@ -6,8 +6,13 @@ import User from '../models/User.js';
 
 // Helper to get Razorpay instance
 const getRazorpayInstance = () => {
-  const key_id = process.env.RAZORPAY_KEY_ID || 'rzp_test_placeholder';
-  const key_secret = process.env.RAZORPAY_KEY_SECRET || 'razorpay_secret_placeholder';
+  const key_id = process.env.RAZORPAY_KEY_ID;
+  const key_secret = process.env.RAZORPAY_KEY_SECRET;
+
+  if (!key_id || !key_secret) {
+    throw new Error('Razorpay credentials are not configured. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in .env');
+  }
+
   return new Razorpay({ key_id, key_secret });
 };
 
@@ -19,10 +24,14 @@ const getRazorpayInstance = () => {
 export const handleRazorpayWebhook = async (req, res) => {
   try {
     const signature = req.headers['x-razorpay-signature'];
-    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || process.env.RAZORPAY_KEY_SECRET || 'razorpay_secret_placeholder';
+    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || process.env.RAZORPAY_KEY_SECRET;
 
-    // Verify signature if real secret configured
-    if (webhookSecret && !webhookSecret.includes('placeholder') && signature) {
+    if (!webhookSecret) {
+      console.error('[Razorpay Webhook Error]: No webhook secret configured.');
+      return res.status(500).json({ status: false, message: 'Webhook secret not configured' });
+    }
+
+    if (signature) {
       const expectedSignature = crypto
         .createHmac('sha256', webhookSecret)
         .update(JSON.stringify(req.body))
@@ -32,6 +41,9 @@ export const handleRazorpayWebhook = async (req, res) => {
         console.warn('[Razorpay Webhook Warning]: Invalid signature received.');
         return res.status(400).json({ status: false, message: 'Invalid webhook signature' });
       }
+    } else {
+      console.warn('[Razorpay Webhook Warning]: No signature header received.');
+      return res.status(400).json({ status: false, message: 'Missing webhook signature' });
     }
 
     const { event, payload } = req.body;
@@ -188,7 +200,7 @@ export const reconcilePayment = async (req, res) => {
     const key_id = process.env.RAZORPAY_KEY_ID;
     const key_secret = process.env.RAZORPAY_KEY_SECRET;
 
-    if (key_id && !key_id.includes('placeholder') && key_secret && !key_secret.includes('placeholder') && paymentId) {
+    if (key_id && key_secret && paymentId) {
       try {
         const razorpay = getRazorpayInstance();
         const rzpPayment = await razorpay.payments.fetch(paymentId);

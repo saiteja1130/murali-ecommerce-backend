@@ -7,8 +7,13 @@ import Cart from '../models/Cart.js';
 
 // Helper to get or instantiate Razorpay client
 const getRazorpayInstance = () => {
-  const key_id = process.env.RAZORPAY_KEY_ID || 'rzp_test_placeholder';
-  const key_secret = process.env.RAZORPAY_KEY_SECRET || 'razorpay_secret_placeholder';
+  const key_id = process.env.RAZORPAY_KEY_ID;
+  const key_secret = process.env.RAZORPAY_KEY_SECRET;
+
+  if (!key_id || !key_secret) {
+    throw new Error('Razorpay credentials are not configured. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in .env');
+  }
+
   return new Razorpay({ key_id, key_secret });
 };
 
@@ -112,37 +117,30 @@ export const createRazorpayOrder = async (req, res) => {
     const orderNumber = generateOrderNumber();
     const amountInPaise = Math.round(total * 100);
 
-    const key_id = process.env.RAZORPAY_KEY_ID || 'rzp_test_placeholder';
-    const key_secret = process.env.RAZORPAY_KEY_SECRET || 'razorpay_secret_placeholder';
+    const key_id = process.env.RAZORPAY_KEY_ID;
 
     let razorpayOrderId = '';
 
-    // Create real Razorpay order if valid keys are configured
-    if (key_id && !key_id.includes('placeholder') && key_secret && !key_secret.includes('placeholder')) {
-      try {
-        const razorpay = getRazorpayInstance();
-        const razorpayOrder = await razorpay.orders.create({
-          amount: amountInPaise,
-          currency: 'INR',
-          receipt: orderNumber,
-          notes: {
-            orderNumber: orderNumber,
-            userId: req.user._id.toString(),
-            customerEmail: req.user.email || '',
-            paymentType: 'UPI_STANDARD',
-          },
-        });
-        razorpayOrderId = razorpayOrder.id;
-      } catch (rzpErr) {
-        console.error('[Razorpay Order Creation Error]:', rzpErr);
-        return res.status(502).json({
-          status: false,
-          message: `Razorpay Gateway Error: ${rzpErr.error?.description || rzpErr.message}`,
-        });
-      }
-    } else {
-      // Local dev simulation fallback
-      razorpayOrderId = `order_sim_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
+    try {
+      const razorpay = getRazorpayInstance();
+      const razorpayOrder = await razorpay.orders.create({
+        amount: amountInPaise,
+        currency: 'INR',
+        receipt: orderNumber,
+        notes: {
+          orderNumber: orderNumber,
+          userId: req.user._id.toString(),
+          customerEmail: req.user.email || '',
+          paymentType: 'UPI_STANDARD',
+        },
+      });
+      razorpayOrderId = razorpayOrder.id;
+    } catch (rzpErr) {
+      console.error('[Razorpay Order Creation Error]:', rzpErr);
+      return res.status(502).json({
+        status: false,
+        message: `Razorpay Gateway Error: ${rzpErr.error?.description || rzpErr.message}`,
+      });
     }
 
     return res.status(200).json({
@@ -184,27 +182,27 @@ export const verifyPayment = async (req, res) => {
       notes,
     } = req.body;
 
-    if (!razorpay_order_id || !razorpay_payment_id) {
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
       return res.status(400).json({
         status: false,
         message: 'Missing Razorpay payment parameters',
       });
     }
 
-    const key_secret = process.env.RAZORPAY_KEY_SECRET || 'razorpay_secret_placeholder';
-    let isSignatureValid = false;
-
-    if (key_secret && !key_secret.includes('placeholder')) {
-      const generatedSignature = crypto
-        .createHmac('sha256', key_secret)
-        .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-        .digest('hex');
-
-      isSignatureValid = generatedSignature === razorpay_signature;
-    } else {
-      // Local dev simulation auto-passes
-      isSignatureValid = true;
+    const key_secret = process.env.RAZORPAY_KEY_SECRET;
+    if (!key_secret) {
+      return res.status(500).json({
+        status: false,
+        message: 'Payment verification unavailable: server configuration error',
+      });
     }
+
+    const generatedSignature = crypto
+      .createHmac('sha256', key_secret)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+      .digest('hex');
+
+    const isSignatureValid = generatedSignature === razorpay_signature;
 
     if (!isSignatureValid) {
       return res.status(400).json({
