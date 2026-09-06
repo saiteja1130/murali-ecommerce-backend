@@ -1,4 +1,5 @@
 import User from '../models/User.js';
+import Order from '../models/Order.js';
 
 export const getUsers = async (req, res) => {
   try {
@@ -28,15 +29,45 @@ export const getUsers = async (req, res) => {
       .select('-password')
       .sort(sortObj)
       .skip(skip)
-      .limit(limit);
+      .limit(limit)
+      .lean();
+
+    // Fetch user order statistics for total spent and order counts
+    const userIds = users.map((u) => u._id);
+    const userOrders = await Order.find({ user: { $in: userIds } })
+      .select('user total orderStatus')
+      .lean();
+
+    const statsMap = {};
+    userOrders.forEach((ord) => {
+      const uId = ord.user?.toString();
+      if (uId) {
+        if (!statsMap[uId]) {
+          statsMap[uId] = { totalSpent: 0, orderCount: 0 };
+        }
+        statsMap[uId].orderCount += 1;
+        if (ord.orderStatus !== 'cancelled') {
+          statsMap[uId].totalSpent += Number(ord.total || 0);
+        }
+      }
+    });
+
+    const enrichedUsers = users.map((u) => {
+      const stats = statsMap[u._id.toString()] || { totalSpent: 0, orderCount: 0 };
+      return {
+        ...u,
+        totalSpent: stats.totalSpent,
+        orderCount: stats.orderCount,
+      };
+    });
 
     res.status(200).json({
       status: true,
-      count: users.length,
+      count: enrichedUsers.length,
       total,
       page,
       totalPages: Math.ceil(total / limit),
-      data: users,
+      data: enrichedUsers,
     });
   } catch (error) {
     console.error('Error fetching users:', error.message);
@@ -49,7 +80,13 @@ export const getUsers = async (req, res) => {
 
 export const getUserById = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id).select('-password');
+    const user = await User.findById(req.params.id)
+      .populate({
+        path: 'wishlist',
+        select: 'name price images sku slug category isStockAvailable',
+      })
+      .select('-password')
+      .lean();
 
     if (!user) {
       return res.status(404).json({
@@ -58,9 +95,25 @@ export const getUserById = async (req, res) => {
       });
     }
 
+    // Fetch orders placed by this user
+    const userOrders = await Order.find({ user: user._id })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const totalSpent = userOrders
+      .filter((o) => o.orderStatus !== 'cancelled')
+      .reduce((sum, o) => sum + (Number(o.total) || 0), 0);
+
+    const fullUserData = {
+      ...user,
+      orders: userOrders,
+      orderCount: userOrders.length,
+      totalSpent,
+    };
+
     res.status(200).json({
       status: true,
-      data: user,
+      data: fullUserData,
     });
   } catch (error) {
     console.error('Error fetching user by ID:', error.message);
