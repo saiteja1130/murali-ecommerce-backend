@@ -2,6 +2,7 @@ import User from '../models/User.js';
 import { generateToken } from '../utils/generateToken.js';
 import { validateRequiredFields } from '../utils/validator.js';
 import { sendEmail } from '../utils/sendEmail.js';
+import { otpEmailTemplate } from '../utils/emailTemplates.js';
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 
@@ -35,9 +36,6 @@ export const registerUser = async (req, res) => {
     let otpCode = generateOTP();
     const otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
-    if (email === "saitejanetha1130@gmail.com") {
-      otpCode = "123456"
-    }
 
     const user = await User.create({
       name,
@@ -50,17 +48,18 @@ export const registerUser = async (req, res) => {
     });
 
     if (user) {
-      const emailHtml = `
-        <h2>Welcome to SUMILUX!</h2>
-        <p>Dear ${user.name},</p>
-        <p>Your email verification OTP code is: <strong>₹{otpCode}</strong></p>
-        <p>This code will expire in 15 minutes.</p>
-      `;
-      // await sendEmail({
-      //   to: user.email,
-      //   subject: 'SUMILUX - Verify your Email',
-      //   html: emailHtml,
-      // });
+      const emailHtml = otpEmailTemplate({
+        name: user.name,
+        otpCode,
+        purpose: 'account verification',
+        expiryMinutes: 15,
+      });
+
+      sendEmail({
+        to: user.email,
+        subject: "Verify Your Email - Murari's Glam & Glow",
+        html: emailHtml,
+      }).catch((err) => console.error('[Signup Email Error]:', err.message));
 
       res.status(201).json({
         status: true,
@@ -197,24 +196,22 @@ export const requestLoginOtp = async (req, res) => {
     }
 
     let otpCode = generateOTP();
-    if (email === "saitejanetha1130@gmail.com") {
-      otpCode = "123456"
-    }
     user.otpCode = otpCode;
     user.otpExpiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 mins
     await user.save();
 
-    const emailHtml = `
-      <h2>SUMILUX Login</h2>
-      <p>Dear ${user.name},</p>
-      <p>Your login OTP code is: <strong>₹{otpCode}</strong></p>
-      <p>This code will expire in 5 minutes.</p>
-    `;
-    // await sendEmail({
-    //   to: user.email,
-    //   subject: 'SUMILUX - Login OTP',
-    //   html: emailHtml,
-    // });
+    const emailHtml = otpEmailTemplate({
+      name: user.name,
+      otpCode,
+      purpose: 'login verification',
+      expiryMinutes: 5,
+    });
+
+    sendEmail({
+      to: user.email,
+      subject: "Your Login Verification Code - Murari's Glam & Glow",
+      html: emailHtml,
+    }).catch((err) => console.error('[Login OTP Email Error]:', err.message));
 
     res.status(200).json({
       status: true,
