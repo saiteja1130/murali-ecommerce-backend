@@ -68,7 +68,11 @@ export const connectDB = async () => {
   });
 
   try {
-    const conn = await mongoose.connect(uri);
+    const conn = await mongoose.connect(uri, {
+      maxPoolSize: 10,
+      serverSelectionTimeoutMS: 10000,
+      socketTimeoutMS: 45000,
+    });
     console.log(`\n------------------------------------------------------`);
     console.log(`  MongoDB Connection Initialized`);
     console.log(`  Environment : ${env.toUpperCase()}`);

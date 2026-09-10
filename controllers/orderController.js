@@ -16,8 +16,8 @@ import {
 
 // Helper to get or instantiate Razorpay client
 const getRazorpayInstance = () => {
-  const key_id = process.env.RAZORPAY_KEY_ID;
-  const key_secret = process.env.RAZORPAY_KEY_SECRET;
+  const key_id = (process.env.RAZORPAY_KEY_ID || '').trim().replace(/^["']|["']$/g, '');
+  const key_secret = (process.env.RAZORPAY_KEY_SECRET || '').trim().replace(/^["']|["']$/g, '');
 
   if (!key_id || !key_secret) {
     throw new Error('Razorpay credentials are not configured. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in .env');
@@ -146,9 +146,12 @@ export const createRazorpayOrder = async (req, res) => {
       razorpayOrderId = razorpayOrder.id;
     } catch (rzpErr) {
       console.error('[Razorpay Order Creation Error]:', rzpErr);
+      const isAuthError = rzpErr.statusCode === 401 || rzpErr.error?.description === 'Authentication failed';
       return res.status(502).json({
         status: false,
-        message: `Razorpay Gateway Error: ${rzpErr.error?.description || rzpErr.message}`,
+        message: isAuthError
+          ? 'Razorpay Authentication failed: Invalid, revoked, or mismatched RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET in server .env'
+          : `Razorpay Gateway Error: ${rzpErr.error?.description || rzpErr.message}`,
       });
     }
 
