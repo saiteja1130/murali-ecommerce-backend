@@ -64,6 +64,14 @@ const productSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    sizes: {
+      type: [String],
+      default: [],
+    },
+    colors: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: [],
+    },
     variants: {
       type: [variantSchema],
       default: [],

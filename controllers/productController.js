@@ -113,7 +113,7 @@ export const getProducts = async (req, res) => {
       }
     }
 
-    // Color variant filtering (checks variants.color or variants.colorHex)
+    // Color filtering (checks variants.color or colors)
     const targetColors = color || colors;
     if (targetColors && targetColors !== 'all') {
       const colorList = Array.isArray(targetColors)
@@ -121,13 +121,19 @@ export const getProducts = async (req, res) => {
         : targetColors.split(',').map((c) => c.trim()).filter(Boolean);
 
       if (colorList.length > 0) {
-        query['variants.color'] = {
-          $in: colorList.map((c) => new RegExp(`^${c}$`, 'i')),
-        };
+        const colorRegexes = colorList.map((c) => new RegExp(`^${c}$`, 'i'));
+        query.$and = query.$and || [];
+        query.$and.push({
+          $or: [
+            { 'variants.color': { $in: colorRegexes } },
+            { 'colors.name': { $in: colorRegexes } },
+            { colors: { $in: colorRegexes } }
+          ]
+        });
       }
     }
 
-    // Size variant filtering (checks variants.size)
+    // Size filtering (checks variants.size or product-level sizes array)
     const targetSizes = size || sizes;
     if (targetSizes && targetSizes !== 'all') {
       const sizeList = Array.isArray(targetSizes)
@@ -135,9 +141,14 @@ export const getProducts = async (req, res) => {
         : targetSizes.split(',').map((s) => s.trim()).filter(Boolean);
 
       if (sizeList.length > 0) {
-        query['variants.size'] = {
-          $in: sizeList.map((s) => new RegExp(`^${s}$`, 'i')),
-        };
+        const sizeRegexes = sizeList.map((s) => new RegExp(`^${s}$`, 'i'));
+        query.$and = query.$and || [];
+        query.$and.push({
+          $or: [
+            { 'variants.size': { $in: sizeRegexes } },
+            { sizes: { $in: sizeRegexes } }
+          ]
+        });
       }
     }
 
@@ -215,6 +226,26 @@ export const getProductFacets = async (req, res) => {
             }
             if (v.size) {
               sizesSet.add(v.size.trim());
+            }
+          });
+        }
+
+        if (Array.isArray(prod.sizes)) {
+          prod.sizes.forEach((s) => {
+            if (s && typeof s === 'string') sizesSet.add(s.trim());
+          });
+        }
+
+        if (Array.isArray(prod.colors)) {
+          prod.colors.forEach((c) => {
+            if (typeof c === 'string' && c.trim()) {
+              if (!colorsMap.has(c.toLowerCase())) {
+                colorsMap.set(c.toLowerCase(), { name: c.trim(), hex: '#1A1A1A' });
+              }
+            } else if (c && c.name) {
+              if (!colorsMap.has(c.name.toLowerCase())) {
+                colorsMap.set(c.name.toLowerCase(), { name: c.name.trim(), hex: c.hex || '#1A1A1A' });
+              }
             }
           });
         }
@@ -346,6 +377,8 @@ export const createProduct = async (req, res) => {
       description: description || '',
       images: finalImages,
       isStockAvailable: isStockAvailable === 'true' || isStockAvailable === true,
+      sizes: req.body.sizes ? (typeof req.body.sizes === 'string' ? JSON.parse(req.body.sizes) : req.body.sizes) : [],
+      colors: req.body.colors ? (typeof req.body.colors === 'string' ? JSON.parse(req.body.colors) : req.body.colors) : [],
       variants: parsedVariants,
       composition: composition || '',
       sustainability: sustainability || '',
@@ -413,6 +446,12 @@ export const updateProduct = async (req, res) => {
     if (description !== undefined) updateData.description = description;
     if (isStockAvailable !== undefined) {
       updateData.isStockAvailable = isStockAvailable === 'true' || isStockAvailable === true;
+    }
+    if (req.body.sizes !== undefined) {
+      updateData.sizes = typeof req.body.sizes === 'string' ? JSON.parse(req.body.sizes) : req.body.sizes;
+    }
+    if (req.body.colors !== undefined) {
+      updateData.colors = typeof req.body.colors === 'string' ? JSON.parse(req.body.colors) : req.body.colors;
     }
     if (composition !== undefined) updateData.composition = composition;
     if (sustainability !== undefined) updateData.sustainability = sustainability;
