@@ -4,7 +4,7 @@ import {
   updateSettings,
   validatePromoCode,
 } from '../controllers/settingsController.js';
-import { protect, adminOnly } from '../middlewares/authMiddleware.js';
+import { protect, adminOnly, optionalAuth } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
 
@@ -13,6 +13,6 @@ router.route('/')
   .put(protect, adminOnly, updateSettings);
 
 router.route('/validate-promo')
-  .post(validatePromoCode);
+  .post(optionalAuth, validatePromoCode);
 
 export default router;

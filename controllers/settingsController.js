@@ -1,4 +1,5 @@
 import Settings from '../models/Settings.js';
+import Order from '../models/Order.js';
 
 /**
  * @desc    Get store settings (shipping, threshold, promo)
@@ -57,9 +58,9 @@ export const updateSettings = async (req, res, next) => {
 };
 
 /**
- * @desc    Validate promotional coupon code
+ * @desc    Validate promotional coupon code (Ensures one-time usage per user)
  * @route   POST /api/settings/validate-promo
- * @access  Public
+ * @access  Public / OptionalAuth
  */
 export const validatePromoCode = async (req, res, next) => {
   try {
@@ -75,6 +76,24 @@ export const validatePromoCode = async (req, res, next) => {
     const inputCode = code.trim().toUpperCase();
 
     if (settings.isPromoActive && settings.promoCode && inputCode === settings.promoCode) {
+      // If user is authenticated, verify they haven't already used this coupon
+      if (req.user && req.user._id) {
+        const previousUsage = await Order.findOne({
+          user: req.user._id,
+          promoCode: inputCode,
+          orderStatus: { $ne: 'cancelled' },
+        });
+
+        if (previousUsage) {
+          return res.status(400).json({
+            status: false,
+            valid: false,
+            alreadyUsed: true,
+            message: `You have already redeemed coupon ${settings.promoCode}. This offer is limited to one use per customer.`,
+          });
+        }
+      }
+
       return res.status(200).json({
         status: true,
         valid: true,

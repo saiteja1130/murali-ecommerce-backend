@@ -198,7 +198,7 @@ export const orderConfirmationTemplate = ({ order, customer }) => {
       </tr>
       ${Number(order.discount || 0) > 0 ? `
       <tr>
-        <td style="padding: 4px 0; font-size: 12px; color: #2E7D32;">Promotional Discount:</td>
+        <td style="padding: 4px 0; font-size: 12px; color: #2E7D32;">Promotional Discount ${order.promoCode ? `(${order.promoCode})` : ''}:</td>
         <td align="right" style="padding: 4px 0; font-family: monospace; font-size: 12px; color: #2E7D32;">-&#8377;${Number(order.discount).toFixed(2)}</td>
       </tr>` : ''}
       <tr>
@@ -265,6 +265,9 @@ export const adminOrderAlertTemplate = ({ order, customer }) => {
     </h2>
     <div style="background-color: #FAF8F5; border: 1px solid #E8E3DE; border-radius: 4px; padding: 16px; margin-bottom: 20px;">
       <p style="margin: 0 0 6px 0; font-size: 13px;"><strong>Order Number:</strong> ${order.orderNumber}</p>
+      <p style="margin: 0 0 6px 0; font-size: 13px;"><strong>Subtotal:</strong> &#8377;${Number(order.subtotal !== undefined ? order.subtotal : (order.total || 0)).toFixed(2)}</p>
+      ${Number(order.discount || 0) > 0 ? `<p style="margin: 0 0 6px 0; font-size: 13px; color: #2E7D32;"><strong>Discount ${order.promoCode ? `(${order.promoCode})` : ''}:</strong> -&#8377;${Number(order.discount).toFixed(2)}</p>` : ''}
+      <p style="margin: 0 0 6px 0; font-size: 13px;"><strong>Shipping:</strong> &#8377;${Number(order.shippingCost || 0).toFixed(2)}</p>
       <p style="margin: 0 0 6px 0; font-size: 13px;"><strong>Total Amount:</strong> &#8377;${Number(order.total || 0).toFixed(2)} (PAID via Razorpay)</p>
       <p style="margin: 0 0 6px 0; font-size: 13px;"><strong>Customer Name:</strong> ${shipping.fullName || customer?.name || 'Customer'}</p>
       <p style="margin: 0 0 6px 0; font-size: 13px;"><strong>Customer Email:</strong> ${customer?.email || 'N/A'}</p>

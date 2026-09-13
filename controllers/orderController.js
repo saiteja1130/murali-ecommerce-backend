@@ -34,7 +34,7 @@ const generateOrderNumber = () => {
 };
 
 // Calculate verified server-side totals
-const calculateOrderTotals = async (rawItems, promoCodeInput) => {
+const calculateOrderTotals = async (rawItems, promoCodeInput, userId = null) => {
   if (!Array.isArray(rawItems) || rawItems.length === 0) {
     throw new Error('Your bag is empty');
   }
@@ -77,12 +77,24 @@ const calculateOrderTotals = async (rawItems, promoCodeInput) => {
     });
   }
 
-  // Promo Code Validation
+  // Promo Code Validation (One-time usage check per user)
   let discount = 0;
   let activePromo = '';
   if (promoCodeInput && settings.isPromoActive) {
     const cleanPromo = promoCodeInput.trim().toUpperCase();
     if (cleanPromo === (settings.promoCode || '').toUpperCase()) {
+      if (userId) {
+        const previousOrder = await Order.findOne({
+          user: userId,
+          promoCode: cleanPromo,
+          orderStatus: { $ne: 'cancelled' },
+        });
+
+        if (previousOrder) {
+          throw new Error(`You have already redeemed coupon ${cleanPromo}. This coupon is only applicable once per user.`);
+        }
+      }
+
       discount = (subtotal * (settings.discountPercent || 0)) / 100;
       activePromo = cleanPromo;
     }
@@ -122,7 +134,7 @@ export const createRazorpayOrder = async (req, res) => {
       });
     }
 
-    const { total } = await calculateOrderTotals(items, promoCode);
+    const { total } = await calculateOrderTotals(items, promoCode, req.user?._id);
     const orderNumber = generateOrderNumber();
     const amountInPaise = Math.round(total * 100);
 
@@ -225,7 +237,7 @@ export const verifyPayment = async (req, res) => {
 
     // Calculate verified server-side totals
     const { verifiedItems, subtotal, discount, shippingCost, total, promoCode: activePromo } =
-      await calculateOrderTotals(items, promoCode);
+      await calculateOrderTotals(items, promoCode, req.user?._id);
 
     const finalOrderNumber = orderNumber || generateOrderNumber();
 

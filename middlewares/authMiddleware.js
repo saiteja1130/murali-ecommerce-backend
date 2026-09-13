@@ -51,3 +51,27 @@ export const adminOnly = (req, res, next) => {
     });
   }
 };
+
+export const optionalAuth = async (req, res, next) => {
+  let token;
+
+  if (
+    req.headers.authorization &&
+    req.headers.authorization.startsWith('Bearer')
+  ) {
+    try {
+      token = req.headers.authorization.split(' ')[1];
+      if (token && token !== 'null' && token !== 'undefined') {
+        const secret = process.env.JWT_SECRET || 'fallback_secret_key_for_development';
+        const decoded = jwt.verify(token, secret);
+        req.user = await User.findById(decoded.id).select('-password');
+      }
+    } catch (error) {
+      // Don't fail the request if token is invalid or expired in optional auth
+      req.user = null;
+    }
+  }
+
+  next();
+};
+
