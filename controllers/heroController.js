@@ -1,20 +1,21 @@
 import HeroSlide from '../models/HeroSlide.js';
 import fs from 'fs';
 import path from 'path';
+import { toFullImageUrl, toLocalFilePath, getBaseUrl } from '../utils/urlHelper.js';
 
 // Helper to save base64 image to uploads/hero directory
 const saveBase64Image = (base64String, req) => {
   if (!base64String || typeof base64String !== 'string') return '';
   
-  // If it's already a regular URL (http, https, /uploads), return it directly
+  // If it's already a regular URL (http, https, /uploads), normalize and return it directly
   if (!base64String.startsWith('data:image')) {
-    return base64String;
+    return toFullImageUrl(req, base64String, 'hero');
   }
 
   try {
     const matches = base64String.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
     if (!matches || matches.length !== 3) {
-      return base64String;
+      return toFullImageUrl(req, base64String, 'hero');
     }
 
     const mimeType = matches[1];
@@ -37,7 +38,8 @@ const saveBase64Image = (base64String, req) => {
 
     fs.writeFileSync(filePath, buffer);
 
-    const fileUrl = `${req.protocol}://${req.get('host')}/uploads/hero/${fileName}`;
+    const baseUrl = getBaseUrl(req);
+    const fileUrl = `${baseUrl}/uploads/hero/${fileName}`;
     return fileUrl;
   } catch (error) {
     console.error('Error saving base64 image:', error);
@@ -47,26 +49,13 @@ const saveBase64Image = (base64String, req) => {
 
 // Helper to delete old image file from disk
 const deleteOldHeroImage = (imageUrl) => {
-  if (!imageUrl || !imageUrl.includes('/uploads/hero/')) return;
-  try {
-    const urlObj = new URL(imageUrl);
-    const relativePath = urlObj.pathname;
-    const fullPath = path.join(process.cwd(), relativePath);
-    if (fs.existsSync(fullPath)) {
-      fs.unlinkSync(fullPath);
-    }
-  } catch (err) {
-    // If URL parsing fails, attempt relative path lookup
+  if (!imageUrl) return;
+  const localPath = toLocalFilePath(imageUrl, 'hero');
+  if (localPath && fs.existsSync(localPath)) {
     try {
-      const parts = imageUrl.split('/uploads/hero/');
-      if (parts[1]) {
-        const fullPath = path.join(process.cwd(), 'uploads', 'hero', parts[1]);
-        if (fs.existsSync(fullPath)) {
-          fs.unlinkSync(fullPath);
-        }
-      }
-    } catch (e) {
-      console.error('Error cleaning up hero image file:', e);
+      fs.unlinkSync(localPath);
+    } catch (err) {
+      console.error('Error cleaning up hero image file:', err);
     }
   }
 };

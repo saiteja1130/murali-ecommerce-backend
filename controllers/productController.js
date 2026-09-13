@@ -3,26 +3,15 @@ import Category from '../models/Category.js';
 import MainCategory from '../models/MainCategory.js';
 import fs from 'fs';
 import path from 'path';
+import { toFullImageUrl, toLocalFilePath } from '../utils/urlHelper.js';
 
 // Helper to delete an image file from disk
 const deleteProductImageFile = (imageUrl) => {
-  if (!imageUrl || !imageUrl.includes('/uploads/products/')) return;
-  try {
-    const urlObj = new URL(imageUrl);
-    const relativePath = urlObj.pathname;
-    const fullPath = path.join(process.cwd(), relativePath);
-    if (fs.existsSync(fullPath)) {
-      fs.unlinkSync(fullPath);
-    }
-  } catch (err) {
+  if (!imageUrl) return;
+  const localPath = toLocalFilePath(imageUrl, 'products');
+  if (localPath && fs.existsSync(localPath)) {
     try {
-      const parts = imageUrl.split('/uploads/products/');
-      if (parts[1]) {
-        const fullPath = path.join(process.cwd(), 'uploads', 'products', parts[1]);
-        if (fs.existsSync(fullPath)) {
-          fs.unlinkSync(fullPath);
-        }
-      }
+      fs.unlinkSync(localPath);
     } catch (e) {
       console.error('Error cleaning up product image file:', e);
     }
@@ -310,7 +299,7 @@ export const createProduct = async (req, res) => {
     let uploadedImages = [];
     if (req.files && Array.isArray(req.files) && req.files.length > 0) {
       uploadedImages = req.files.map(
-        (file) => `${req.protocol}://${req.get('host')}/uploads/products/${file.filename}`
+        (file) => toFullImageUrl(req, file.filename, 'products')
       );
     }
 
@@ -320,11 +309,11 @@ export const createProduct = async (req, res) => {
       try {
         const extraImages = typeof req.body.images === 'string' ? JSON.parse(req.body.images) : req.body.images;
         if (Array.isArray(extraImages)) {
-          finalImages = [...finalImages, ...extraImages];
+          finalImages = [...finalImages, ...extraImages.map((img) => toFullImageUrl(req, img, 'products'))];
         }
       } catch (e) {
         if (typeof req.body.images === 'string') {
-          finalImages.push(req.body.images);
+          finalImages.push(toFullImageUrl(req, req.body.images, 'products'));
         }
       }
     }
@@ -455,12 +444,15 @@ export const updateProduct = async (req, res) => {
     let newImages = [];
     if (req.files && Array.isArray(req.files) && req.files.length > 0) {
       newImages = req.files.map(
-        (file) => `${req.protocol}://${req.get('host')}/uploads/products/${file.filename}`
+        (file) => toFullImageUrl(req, file.filename, 'products')
       );
     }
 
+    // Normalize retained images to full URLs
+    const normalizedRetained = (retainedImages || []).map((img) => toFullImageUrl(req, img, 'products'));
+
     // If new files were uploaded or existing images list was modified, clean up removed images from disk
-    const combinedImages = [...retainedImages, ...newImages];
+    const combinedImages = [...normalizedRetained, ...newImages];
     const removedImages = product.images.filter((oldImg) => !combinedImages.includes(oldImg));
     removedImages.forEach((img) => deleteProductImageFile(img));
 

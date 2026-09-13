@@ -24,6 +24,9 @@ connectDB();
 
 const app = express();
 
+// Trust reverse proxy headers (e.g. Nginx, Cloudflare) for accurate req.protocol
+app.set('trust proxy', 1);
+
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));

@@ -25,7 +25,7 @@
 SUMILUX is a full-stack, enterprise-grade contemporary luxury and apparel e-commerce platform designed for multi-department retail (e.g., Women's Fashion, Kids, Accessories). 
 
 ### Business Goals & Value Proposition
-- **High-End Editorial Aesthetics**: Tailored color palette (Obsidian `#1D241C`, Warm Gold `#C69E58`, Botanical Sage `#506040`, Ivory `#FAF8F5`) with Playfair Display serif headings and Plus Jakarta Sans body typography.
+- **High-End Editorial Aesthetics**: Tailored color palette (Obsidian `#1D241C`, Warm Gold `#C69E58`, Botanical Sage `#506040`, Ivory `#FAF8F5`) with Playfair Display serif headings and Inter body typography.
 - **Zero Friction Commerce**: Instant 1-click Quick Add, optimistic UI toast notifications, guest shopping with automatic cloud-cart sync upon authentication, and streamlined multi-step checkout.
 - **Unified Merchant Control**: Real-time administrative dashboard for catalog creation, department/category taxonomy, variant-level stock management, and order fulfillment.
 

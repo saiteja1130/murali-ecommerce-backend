@@ -1,5 +1,7 @@
 import MainCategory from '../models/MainCategory.js';
 import Category from '../models/Category.js';
+import fs from 'fs';
+import { toFullImageUrl, toLocalFilePath } from '../utils/urlHelper.js';
 
 /**
  * @desc    Get all main categories
@@ -109,9 +111,9 @@ export const createMainCategory = async (req, res, next) => {
 
     let imagePath = '';
     if (req.file) {
-      imagePath = `/uploads/main-categories/${req.file.filename}`;
+      imagePath = toFullImageUrl(req, req.file.filename, 'main-categories');
     } else if (req.body.image) {
-      imagePath = req.body.image;
+      imagePath = toFullImageUrl(req, req.body.image, 'main-categories');
     }
 
     const mainCategory = await MainCategory.create({
@@ -161,9 +163,16 @@ export const updateMainCategory = async (req, res, next) => {
     if (isActive !== undefined) mainCategory.isActive = isActive === 'true' || isActive === true;
 
     if (req.file) {
-      mainCategory.image = `/uploads/main-categories/${req.file.filename}`;
-    } else if (req.body.image) {
-      mainCategory.image = req.body.image;
+      const oldImage = mainCategory.image;
+      mainCategory.image = toFullImageUrl(req, req.file.filename, 'main-categories');
+      if (oldImage) {
+        const oldPath = toLocalFilePath(oldImage, 'main-categories');
+        if (oldPath && fs.existsSync(oldPath)) {
+          try { fs.unlinkSync(oldPath); } catch (e) {}
+        }
+      }
+    } else if (req.body.image !== undefined && req.body.image !== mainCategory.image) {
+      mainCategory.image = toFullImageUrl(req, req.body.image, 'main-categories');
     }
 
     await mainCategory.save();
@@ -205,6 +214,13 @@ export const deleteMainCategory = async (req, res, next) => {
         status: false,
         message: `Cannot delete "${mainCategory.name}" because it contains ${subcategoryCount} subcategory(s). Reassign or delete subcategories first.`,
       });
+    }
+
+    if (mainCategory.image) {
+      const oldPath = toLocalFilePath(mainCategory.image, 'main-categories');
+      if (oldPath && fs.existsSync(oldPath)) {
+        try { fs.unlinkSync(oldPath); } catch (e) {}
+      }
     }
 
     await MainCategory.findByIdAndDelete(id);

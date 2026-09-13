@@ -3,6 +3,7 @@ import MainCategory from '../models/MainCategory.js';
 import Product from '../models/Product.js';
 import fs from 'fs';
 import path from 'path';
+import { toFullImageUrl, toLocalFilePath } from '../utils/urlHelper.js';
 
 export const getCategories = async (req, res, next) => {
   try {
@@ -65,9 +66,9 @@ export const createCategory = async (req, res, next) => {
 
     let imageUrl = '';
     if (req.file) {
-      imageUrl = `/uploads/categories/${req.file.filename}`;
+      imageUrl = toFullImageUrl(req, req.file.filename, 'categories');
     } else if (req.body.image) {
-      imageUrl = typeof req.body.image === 'string' ? req.body.image : '';
+      imageUrl = toFullImageUrl(req, typeof req.body.image === 'string' ? req.body.image : '', 'categories');
     }
 
     const generatedSlug = (slug || name).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-');
@@ -122,16 +123,16 @@ export const updateCategory = async (req, res, next) => {
     }
 
     if (req.file) {
-      updateData.image = `/uploads/categories/${req.file.filename}`;
+      updateData.image = toFullImageUrl(req, req.file.filename, 'categories');
 
-      if (category.image && category.image.includes('/uploads/')) {
-        const oldImagePath = path.join(process.cwd(), category.image.replace(/^[a-zA-Z]+:\/\/[^/]+/, ''));
-        if (fs.existsSync(oldImagePath)) {
+      if (category.image) {
+        const oldImagePath = toLocalFilePath(category.image, 'categories');
+        if (oldImagePath && fs.existsSync(oldImagePath)) {
           try { fs.unlinkSync(oldImagePath); } catch (e) {}
         }
       }
     } else if (req.body.image !== undefined && req.body.image !== category.image) {
-      updateData.image = req.body.image;
+      updateData.image = toFullImageUrl(req, req.body.image, 'categories');
     }
 
     category = await Category.findByIdAndUpdate(req.params.id, updateData, {
@@ -165,13 +166,11 @@ export const deleteCategory = async (req, res, next) => {
       });
     }
 
-    if (category.image && category.image.includes('/uploads/')) {
-      try {
-        const imagePath = path.join(process.cwd(), category.image.replace(/^[a-zA-Z]+:\/\/[^/]+/, ''));
-        if (fs.existsSync(imagePath)) {
-          fs.unlinkSync(imagePath);
-        }
-      } catch (e) {}
+    if (category.image) {
+      const imagePath = toLocalFilePath(category.image, 'categories');
+      if (imagePath && fs.existsSync(imagePath)) {
+        try { fs.unlinkSync(imagePath); } catch (e) {}
+      }
     }
 
     await Category.findByIdAndDelete(req.params.id);
