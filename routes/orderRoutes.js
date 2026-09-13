@@ -2,6 +2,7 @@ import express from 'express';
 import {
   createRazorpayOrder,
   verifyPayment,
+  handleRazorpayPostCallback,
   createCodOrder,
   getMyOrders,
   getOrderById,
@@ -13,6 +14,9 @@ import {
 import { protect, adminOnly } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
+
+// Public callback for Razorpay (Used by mobile Intent flow)
+router.post('/razorpay-callback', handleRazorpayPostCallback);
 
 // Customer Order Lifecycle
 router.post('/create-razorpay-order', protect, createRazorpayOrder);
