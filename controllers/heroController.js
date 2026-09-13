@@ -79,25 +79,34 @@ export const getHeroSlides = async (req, res) => {
 
 export const createHeroSlide = async (req, res) => {
   try {
-    const { title, subtitle, image, ctaText, ctaLink, isActive, order } = req.body;
-    
-    // Process image (convert base64 to file URL if needed)
-    const processedImage = saveBase64Image(image, req);
+    const { title, subtitle, ctaText, ctaLink, isActive, order } = req.body;
+    let finalImageUrl = '';
+
+    if (req.file) {
+      const baseUrl = getBaseUrl(req);
+      finalImageUrl = `${baseUrl}/uploads/hero/${req.file.filename}`;
+    } else if (req.body.image) {
+      finalImageUrl = saveBase64Image(req.body.image, req);
+    }
+
+    if (!finalImageUrl) {
+      return res.status(400).json({ status: false, message: 'Hero slide image is required' });
+    }
 
     // Automatically assign next order if not provided
-    let slideOrder = order;
-    if (slideOrder === undefined) {
+    let slideOrder = order !== undefined ? Number(order) : undefined;
+    if (slideOrder === undefined || isNaN(slideOrder)) {
       const maxOrderSlide = await HeroSlide.findOne().sort({ order: -1 });
       slideOrder = maxOrderSlide ? maxOrderSlide.order + 1 : 1;
     }
 
     const newSlide = await HeroSlide.create({
       title,
-      subtitle,
-      image: processedImage,
-      ctaText,
-      ctaLink,
-      isActive,
+      subtitle: subtitle || '',
+      image: finalImageUrl,
+      ctaText: ctaText || 'Shop Collection',
+      ctaLink: ctaLink || '/products',
+      isActive: isActive === 'true' || isActive === true || isActive === undefined,
       order: slideOrder,
     });
 
@@ -120,7 +129,23 @@ export const updateHeroSlide = async (req, res) => {
     }
 
     const updateData = { ...req.body };
-    if (req.body.image) {
+
+    if (updateData.isActive !== undefined) {
+      updateData.isActive = updateData.isActive === 'true' || updateData.isActive === true;
+    }
+    if (updateData.order !== undefined) {
+      updateData.order = Number(updateData.order);
+    }
+
+    if (req.file) {
+      const baseUrl = getBaseUrl(req);
+      const newImageUrl = `${baseUrl}/uploads/hero/${req.file.filename}`;
+      updateData.image = newImageUrl;
+
+      if (slide.image && slide.image.includes('/uploads/hero/')) {
+        deleteOldHeroImage(slide.image);
+      }
+    } else if (req.body.image) {
       const processedImage = saveBase64Image(req.body.image, req);
       updateData.image = processedImage;
 
