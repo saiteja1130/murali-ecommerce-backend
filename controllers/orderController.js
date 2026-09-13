@@ -134,7 +134,7 @@ export const createRazorpayOrder = async (req, res) => {
       });
     }
 
-    const { total } = await calculateOrderTotals(items, promoCode, req.user?._id);
+    const { verifiedItems, subtotal, discount, shippingCost, total, promoCode: activePromo } = await calculateOrderTotals(items, promoCode, req.user?._id);
     const orderNumber = generateOrderNumber();
     const amountInPaise = Math.round(total * 100);
 
