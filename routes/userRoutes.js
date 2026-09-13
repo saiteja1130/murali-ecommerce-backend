@@ -7,6 +7,7 @@ import {
   updateUserAddress,
   deleteUserAddress,
   setDefaultUserAddress,
+  updateUserProfile,
 } from '../controllers/userController.js';
 import { protect, adminOnly } from '../middlewares/authMiddleware.js';
 
@@ -23,6 +24,10 @@ router.route('/addresses/:addressId')
 
 router.route('/addresses/:addressId/default')
   .patch(protect, setDefaultUserAddress);
+
+// User Profile Route
+router.route('/profile')
+  .put(protect, updateUserProfile);
 
 // Admin User Directory Routes
 router.route('/')

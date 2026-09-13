@@ -370,3 +370,42 @@ export const setDefaultUserAddress = async (req, res) => {
     });
   }
 };
+
+// Update user profile
+export const updateUserProfile = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ status: false, message: 'User not found' });
+    }
+
+    user.name = req.body.name || user.name;
+    user.phone = req.body.phone || user.phone;
+
+    // Only allow email change if it's not taken
+    if (req.body.email && req.body.email !== user.email) {
+      const emailExists = await User.findOne({ email: req.body.email });
+      if (emailExists) {
+        return res.status(400).json({ status: false, message: 'Email is already in use by another account' });
+      }
+      user.email = req.body.email;
+    }
+
+    const updatedUser = await user.save();
+
+    res.status(200).json({
+      status: true,
+      message: 'Profile updated successfully',
+      user: {
+        _id: updatedUser._id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        phone: updatedUser.phone,
+        role: updatedUser.role,
+      },
+    });
+  } catch (error) {
+    console.error('Error updating profile:', error.message);
+    res.status(500).json({ status: false, message: 'Server Error: Failed to update profile' });
+  }
+};
