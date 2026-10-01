@@ -14,6 +14,20 @@ const formatCartResponse = (cartDoc) => {
       const price = typeof prod.price === 'number' ? prod.price : Number(prod.price) || 0;
       const isAvailable = prod.isStockAvailable !== false;
 
+      // Check for color-specific image
+      const colorName = (item.selectedColor?.name || (typeof item.selectedColor === 'string' ? item.selectedColor : '')).trim().toLowerCase();
+      let matchedColorImg = '';
+      if (colorName && Array.isArray(prod.colorImages) && prod.colorImages.length > 0) {
+        const match = prod.colorImages.find(
+          (ci) => ci.color && ci.color.trim().toLowerCase() === colorName
+        );
+        if (match && Array.isArray(match.images) && match.images.length > 0) {
+          matchedColorImg = match.images[0];
+        }
+      }
+
+      const itemImg = matchedColorImg || item.image || prod.images?.[0] || 'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?q=80&w=900';
+
       return {
         id: item.cartItemId,
         cartItemId: item.cartItemId,
@@ -21,6 +35,7 @@ const formatCartResponse = (cartDoc) => {
         quantity: item.quantity,
         selectedSize: item.selectedSize || 'Standard',
         selectedColor: item.selectedColor || { name: 'Standard', hex: '#1D241C' },
+        image: itemImg,
         product: {
           id: prod._id,
           _id: prod._id,
@@ -29,8 +44,9 @@ const formatCartResponse = (cartDoc) => {
           sku: prod.sku,
           price: price,
           originalPrice: prod.originalPrice,
-          image: prod.images?.[0] || 'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?q=80&w=900',
+          image: itemImg,
           images: prod.images || [],
+          colorImages: prod.colorImages || [],
           category: prod.category?.name || 'Collection',
           isStockAvailable: isAvailable,
           totalStock: prod.variants?.reduce((acc, v) => acc + (v.stock || 0), 0) ?? (isAvailable ? 25 : 0),
@@ -107,6 +123,19 @@ export const addToCart = async (req, res, next) => {
     const cartItemId = `${product._id}-${size}-${color.name || 'Standard'}`;
     const qty = Math.max(1, parseInt(quantity, 10) || 1);
 
+    // Resolve color image
+    const colorName = (color.name || '').trim().toLowerCase();
+    let matchedColorImage = '';
+    if (colorName && Array.isArray(product.colorImages) && product.colorImages.length > 0) {
+      const match = product.colorImages.find(
+        (ci) => ci.color && ci.color.trim().toLowerCase() === colorName
+      );
+      if (match && Array.isArray(match.images) && match.images.length > 0) {
+        matchedColorImage = match.images[0];
+      }
+    }
+    const itemImage = matchedColorImage || (Array.isArray(product.images) && product.images[0]) || '';
+
     let cart = await Cart.findOne({ user: req.user._id });
     if (!cart) {
       cart = new Cart({ user: req.user._id, items: [] });
@@ -116,12 +145,16 @@ export const addToCart = async (req, res, next) => {
 
     if (existingIndex > -1) {
       cart.items[existingIndex].quantity += qty;
+      if (!cart.items[existingIndex].image && itemImage) {
+        cart.items[existingIndex].image = itemImage;
+      }
     } else {
       cart.items.push({
         cartItemId,
         product: product._id,
         selectedSize: size,
         selectedColor: color,
+        image: itemImage,
         quantity: qty,
       });
     }
@@ -274,15 +307,32 @@ export const mergeCart = async (req, res, next) => {
       const cartItemId = gItem.id || `${product._id}-${size}-${color.name || 'Standard'}`;
       const qty = Math.max(1, parseInt(gItem.quantity, 10) || 1);
 
+      // Resolve color image
+      const gColorName = (color.name || '').trim().toLowerCase();
+      let matchedColorImage = '';
+      if (gColorName && Array.isArray(product.colorImages) && product.colorImages.length > 0) {
+        const match = product.colorImages.find(
+          (ci) => ci.color && ci.color.trim().toLowerCase() === gColorName
+        );
+        if (match && Array.isArray(match.images) && match.images.length > 0) {
+          matchedColorImage = match.images[0];
+        }
+      }
+      const itemImage = gItem.image || matchedColorImage || (Array.isArray(product.images) && product.images[0]) || '';
+
       const existingIndex = cart.items.findIndex((item) => item.cartItemId === cartItemId);
       if (existingIndex > -1) {
         cart.items[existingIndex].quantity += qty;
+        if (!cart.items[existingIndex].image && itemImage) {
+          cart.items[existingIndex].image = itemImage;
+        }
       } else {
         cart.items.push({
           cartItemId,
           product: product._id,
           selectedSize: size,
           selectedColor: color,
+          image: itemImage,
           quantity: qty,
         });
       }

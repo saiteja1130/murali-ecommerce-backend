@@ -60,6 +60,19 @@ const productSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    colorImages: {
+      type: [
+        new mongoose.Schema(
+          {
+            color: { type: String, trim: true },
+            colorHex: { type: String, default: '#1A1A1A' },
+            images: { type: [String], default: [] },
+          },
+          { _id: false }
+        ),
+      ],
+      default: [],
+    },
     isStockAvailable: {
       type: Boolean,
       default: true,

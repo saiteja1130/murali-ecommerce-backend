@@ -5,6 +5,54 @@ import fs from 'fs';
 import path from 'path';
 import { toFullImageUrl, toLocalFilePath } from '../utils/urlHelper.js';
 
+/**
+ * Builds the colorImages array by merging:
+ * - existingColorImages: [{color, colorHex, images:[urls]}] already stored
+ * - colorImagesBody:     [{color, colorHex, images:[urls]}] sent as JSON in body (kept URLs)
+ * - colorImagesMeta:     [{fileIndex, color, colorHex}] mapping new uploaded files to colors
+ * - uploadedUrls:        full URLs of newly uploaded files in upload order
+ */
+const buildColorImages = (existingColorImages = [], colorImagesBody = [], colorImagesMeta = [], uploadedUrls = [], req) => {
+  // Start from body-supplied color groups (existing URLs already resolved)
+  const colorMap = new Map();
+
+  // Seed from existing saved entries so we don't lose unreferenced color groups
+  existingColorImages.forEach((ci) => {
+    const key = (ci.color || '').toLowerCase();
+    if (key) {
+      colorMap.set(key, {
+        color: ci.color,
+        colorHex: ci.colorHex || '#1A1A1A',
+        images: (ci.images || []).map((img) => toFullImageUrl(req, img, 'products')),
+      });
+    }
+  });
+
+  // Overwrite / merge with body-supplied URL groups
+  colorImagesBody.forEach((ci) => {
+    const key = (ci.color || '').toLowerCase();
+    if (!key) return;
+    const resolved = (ci.images || []).map((img) => toFullImageUrl(req, img, 'products'));
+    colorMap.set(key, {
+      color: ci.color,
+      colorHex: ci.colorHex || '#1A1A1A',
+      images: resolved,
+    });
+  });
+
+  // Attach newly uploaded files to their color groups via meta
+  colorImagesMeta.forEach(({ fileIndex, color, colorHex }) => {
+    const key = (color || '').toLowerCase();
+    if (!key || fileIndex == null || !uploadedUrls[fileIndex]) return;
+    if (!colorMap.has(key)) {
+      colorMap.set(key, { color, colorHex: colorHex || '#1A1A1A', images: [] });
+    }
+    colorMap.get(key).images.push(uploadedUrls[fileIndex]);
+  });
+
+  return Array.from(colorMap.values());
+};
+
 // Helper to delete an image file from disk
 const deleteProductImageFile = (imageUrl) => {
   if (!imageUrl) return;
@@ -349,6 +397,29 @@ export const createProduct = async (req, res) => {
       }
     }
 
+    // Parse colorImages (existing URL groups) and colorImagesMeta (file-to-color mapping)
+    let colorImagesBody = [];
+    if (req.body.colorImages) {
+      try {
+        colorImagesBody = typeof req.body.colorImages === 'string'
+          ? JSON.parse(req.body.colorImages)
+          : req.body.colorImages;
+        if (!Array.isArray(colorImagesBody)) colorImagesBody = [];
+      } catch (e) { colorImagesBody = []; }
+    }
+
+    let colorImagesMeta = [];
+    if (req.body.colorImagesMeta) {
+      try {
+        colorImagesMeta = typeof req.body.colorImagesMeta === 'string'
+          ? JSON.parse(req.body.colorImagesMeta)
+          : req.body.colorImagesMeta;
+        if (!Array.isArray(colorImagesMeta)) colorImagesMeta = [];
+      } catch (e) { colorImagesMeta = []; }
+    }
+
+    const builtColorImages = buildColorImages([], colorImagesBody, colorImagesMeta, uploadedImages, req);
+
     // Parse variants if passed as stringified JSON
     let parsedVariants = [];
     if (variants) {
@@ -376,6 +447,7 @@ export const createProduct = async (req, res) => {
       originalPrice: originalPrice ? Number(originalPrice) : null,
       description: description || '',
       images: finalImages,
+      colorImages: builtColorImages,
       isStockAvailable: isStockAvailable === 'true' || isStockAvailable === true,
       sizes: req.body.sizes ? (typeof req.body.sizes === 'string' ? JSON.parse(req.body.sizes) : req.body.sizes) : [],
       colors: req.body.colors ? (typeof req.body.colors === 'string' ? JSON.parse(req.body.colors) : req.body.colors) : [],
@@ -496,6 +568,38 @@ export const updateProduct = async (req, res) => {
     removedImages.forEach((img) => deleteProductImageFile(img));
 
     updateData.images = combinedImages;
+
+    // Handle colorImages update: merge existing, body-supplied URL groups, and new file mappings
+    let colorImagesBody = [];
+    if (req.body.colorImages) {
+      try {
+        colorImagesBody = typeof req.body.colorImages === 'string'
+          ? JSON.parse(req.body.colorImages)
+          : req.body.colorImages;
+        if (!Array.isArray(colorImagesBody)) colorImagesBody = [];
+      } catch (e) { colorImagesBody = []; }
+    }
+
+    let colorImagesMeta = [];
+    if (req.body.colorImagesMeta) {
+      try {
+        colorImagesMeta = typeof req.body.colorImagesMeta === 'string'
+          ? JSON.parse(req.body.colorImagesMeta)
+          : req.body.colorImagesMeta;
+        if (!Array.isArray(colorImagesMeta)) colorImagesMeta = [];
+      } catch (e) { colorImagesMeta = []; }
+    }
+
+    // Only update colorImages if the client sent explicit data; otherwise preserve existing
+    if (req.body.colorImages !== undefined || req.body.colorImagesMeta !== undefined) {
+      updateData.colorImages = buildColorImages(
+        product.colorImages || [],
+        colorImagesBody,
+        colorImagesMeta,
+        newImages,
+        req
+      );
+    }
 
     const updatedProduct = await Product.findByIdAndUpdate(req.params.id, updateData, {
       new: true,

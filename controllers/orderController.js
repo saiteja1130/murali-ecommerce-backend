@@ -60,9 +60,23 @@ const calculateOrderTotals = async (rawItems, promoCodeInput, userId = null) => 
     const itemTotal = price * quantity;
     subtotal += itemTotal;
 
+    // Resolve color-specific image
+    const selectedColor = item.selectedColor || { name: 'Standard', hex: '#1D241C' };
+    const colorName = (selectedColor.name || (typeof selectedColor === 'string' ? selectedColor : '')).trim().toLowerCase();
+    let matchedColorImage = '';
+    if (colorName && Array.isArray(product.colorImages) && product.colorImages.length > 0) {
+      const match = product.colorImages.find(
+        (ci) => ci.color && ci.color.trim().toLowerCase() === colorName
+      );
+      if (match && Array.isArray(match.images) && match.images.length > 0) {
+        matchedColorImage = match.images[0];
+      }
+    }
+
     const primaryImage =
-      (Array.isArray(product.images) && product.images[0]) ||
+      matchedColorImage ||
       item.image ||
+      (Array.isArray(product.images) && product.images[0]) ||
       '';
 
     verifiedItems.push({
@@ -71,7 +85,7 @@ const calculateOrderTotals = async (rawItems, promoCodeInput, userId = null) => 
       price: price,
       quantity: quantity,
       selectedSize: item.selectedSize || 'Standard',
-      selectedColor: item.selectedColor || { name: 'Standard', hex: '#1D241C' },
+      selectedColor: selectedColor,
       image: primaryImage,
       sku: product.sku || '',
     });
@@ -493,9 +507,13 @@ export const getOrderById = async (req, res) => {
     let order = null;
 
     if (id.startsWith('SMLX-')) {
-      order = await Order.findOne({ orderNumber: id }).populate('user', 'name email phone');
+      order = await Order.findOne({ orderNumber: id })
+        .populate('user', 'name email phone')
+        .populate('items.product', 'name slug images colorImages variants');
     } else {
-      order = await Order.findById(id).populate('user', 'name email phone');
+      order = await Order.findById(id)
+        .populate('user', 'name email phone')
+        .populate('items.product', 'name slug images colorImages variants');
     }
 
     if (!order) {
