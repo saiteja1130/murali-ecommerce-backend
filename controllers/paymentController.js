@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import Razorpay from 'razorpay';
 import Order from '../models/Order.js';
+import CheckoutSession from '../models/CheckoutSession.js';
 import Cart from '../models/Cart.js';
 import User from '../models/User.js';
 
@@ -86,28 +87,64 @@ export const handleRazorpayWebhook = async (req, res) => {
           }
         }
         console.log(`[Razorpay Webhook]: Existing Order #${order.orderNumber} confirmed & marked as PAID.`);
-      } else if (userId) {
-        // Edge Case: Frontend disconnected before /verify-payment was called!
-        // We recover the order using the user's active cart and details.
-        const user = await User.findById(userId);
-        const userCart = await Cart.findOne({ user: userId }).populate('items.product');
-
-        if (user && userCart && userCart.items && userCart.items.length > 0) {
-          const verifiedItems = userCart.items
-            .filter((item) => item.product && !item.product.isDeleted)
-            .map((item) => ({
-              product: item.product._id,
-              name: item.product.name,
-              price: item.product.price,
-              quantity: item.quantity || 1,
-              selectedSize: item.size || 'M',
-              selectedColor: item.color || 'Standard',
-              image: (Array.isArray(item.product.images) && item.product.images[0]) || item.product.image || '',
-            }));
-
-          const primaryAddress = (user.addresses || []).find((a) => a.isDefault) || (user.addresses || [])[0] || {};
-
+      } else {
+        // Order does not exist yet -> Find CheckoutSession
+        const session = razorpayOrderId ? await CheckoutSession.findOne({ razorpayOrderId }) : null;
+        if (session) {
           const recoveredOrder = await Order.create({
+            orderNumber: session.orderNumber || orderNumber || `SMLX-${Date.now().toString().slice(-6)}`,
+            user: session.user,
+            items: session.items,
+            shippingAddress: session.shippingAddress,
+            paymentMethod: 'upi',
+            paymentStatus: 'paid',
+            orderStatus: 'confirmed',
+            subtotal: session.subtotal,
+            shippingCost: session.shippingCost,
+            discount: session.discount,
+            promoCode: session.promoCode,
+            total: session.total,
+            currency: session.currency || 'INR',
+            trackingNumber: `SMLX-EXP-${Math.floor(100000000 + Math.random() * 900000000)}`,
+            notes: session.notes || '',
+            razorpay: {
+              orderId: razorpayOrderId || '',
+              paymentId: paymentId || '',
+              signature: 'webhook_verified',
+            },
+          });
+
+          await CheckoutSession.deleteOne({ _id: session._id }).catch(() => {});
+
+          if (session.user) {
+            try {
+              await Cart.findOneAndUpdate({ user: session.user }, { items: [] });
+            } catch (cartErr) {
+              console.warn('Could not clear bag after order confirmation:', cartErr.message);
+            }
+          }
+          console.log(`[Razorpay Webhook]: Created confirmed Order #${recoveredOrder.orderNumber} from CheckoutSession.`);
+        } else if (userId) {
+          // Edge Case: Fallback recovery using user's active cart and details.
+          const user = await User.findById(userId);
+          const userCart = await Cart.findOne({ user: userId }).populate('items.product');
+
+          if (user && userCart && userCart.items && userCart.items.length > 0) {
+            const verifiedItems = userCart.items
+              .filter((item) => item.product && !item.product.isDeleted)
+              .map((item) => ({
+                product: item.product._id,
+                name: item.product.name,
+                price: item.product.price,
+                quantity: item.quantity || 1,
+                selectedSize: item.size || 'M',
+                selectedColor: item.color || 'Standard',
+                image: (Array.isArray(item.product.images) && item.product.images[0]) || item.product.image || '',
+              }));
+
+            const primaryAddress = (user.addresses || []).find((a) => a.isDefault) || (user.addresses || [])[0] || {};
+
+            const recoveredOrder = await Order.create({
             orderNumber: orderNumber || `SMLX-${Date.now().toString().slice(-6)}`,
             user: userId,
             items: verifiedItems,
@@ -144,6 +181,7 @@ export const handleRazorpayWebhook = async (req, res) => {
         }
       }
     }
+  }
 
     // 2. Handle Refund Processed in Razorpay Dashboard
     if (event === 'refund.processed') {

@@ -67,6 +67,20 @@ export const connectDB = async () => {
     console.warn(`[MongoDB Event]: Connection disconnected.`);
   });
 
+  mongoose.connection.once('open', async () => {
+    try {
+      const Order = mongoose.models.Order || mongoose.model('Order');
+      if (Order) {
+        const res = await Order.deleteMany({ paymentStatus: 'pending', orderStatus: 'pending' });
+        if (res.deletedCount > 0) {
+          console.log(`[Order Cleanup]: Cleared ${res.deletedCount} legacy abandoned pending orders.`);
+        }
+      }
+    } catch (e) {
+      // Ignore if model not registered yet
+    }
+  });
+
   try {
     const conn = await mongoose.connect(uri, {
       maxPoolSize: 10,

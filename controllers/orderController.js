@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import Razorpay from 'razorpay';
 import Order from '../models/Order.js';
+import CheckoutSession from '../models/CheckoutSession.js';
 import Product from '../models/Product.js';
 import Settings from '../models/Settings.js';
 import Cart from '../models/Cart.js';
@@ -181,38 +182,36 @@ export const createRazorpayOrder = async (req, res) => {
       });
     }
 
-    // Create the pending Order in MongoDB
-    await Order.create({
-      orderNumber: orderNumber,
-      user: req.user._id,
-      items: verifiedItems,
-      shippingAddress: {
-        fullName: shippingAddress?.fullName || req.user.name || 'Customer',
-        phone: shippingAddress?.phone || req.user.phone || '',
-        street: shippingAddress?.street || '',
-        apartment: shippingAddress?.apartment || '',
-        city: shippingAddress?.city || '',
-        state: shippingAddress?.state || '',
-        postalCode: shippingAddress?.postalCode || '',
-        country: shippingAddress?.country || 'India',
-        addressType: shippingAddress?.addressType || 'home',
+    // Store the pending checkout session in CheckoutSession (DO NOT create in Order collection until payment succeeds)
+    await CheckoutSession.findOneAndUpdate(
+      { razorpayOrderId: razorpayOrderId },
+      {
+        razorpayOrderId: razorpayOrderId,
+        orderNumber: orderNumber,
+        user: req.user._id,
+        items: verifiedItems,
+        shippingAddress: {
+          fullName: shippingAddress?.fullName || req.user.name || 'Customer',
+          phone: shippingAddress?.phone || req.user.phone || '',
+          street: shippingAddress?.street || '',
+          apartment: shippingAddress?.apartment || '',
+          city: shippingAddress?.city || '',
+          state: shippingAddress?.state || '',
+          postalCode: shippingAddress?.postalCode || '',
+          country: shippingAddress?.country || 'India',
+          addressType: shippingAddress?.addressType || 'home',
+        },
+        paymentMethod: 'upi',
+        subtotal,
+        shippingCost,
+        discount,
+        promoCode: activePromo,
+        total,
+        currency: 'INR',
+        notes: req.body.notes || '',
       },
-      paymentMethod: 'upi',
-      paymentStatus: 'pending',
-      orderStatus: 'pending',
-      subtotal,
-      shippingCost,
-      discount,
-      promoCode: activePromo,
-      total,
-      currency: 'INR',
-      notes: req.body.notes || '',
-      razorpay: {
-        orderId: razorpayOrderId,
-        paymentId: '',
-        signature: '',
-      },
-    });
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
 
     return res.status(200).json({
       status: true,
@@ -282,29 +281,102 @@ export const verifyPayment = async (req, res) => {
       });
     }
 
-    // Find the pending order
-    const order = await Order.findOne({ 'razorpay.orderId': razorpay_order_id }).populate('user');
+    // 1. Check if Order already exists in DB (idempotent response if already processed)
+    let order = await Order.findOne({ 'razorpay.orderId': razorpay_order_id }).populate('user');
     
-    if (!order) {
-      return res.status(404).json({ status: false, message: 'Order not found for this payment' });
-    }
+    if (order) {
+      if (order.paymentStatus === 'paid') {
+        return res.status(200).json({
+          status: true,
+          message: 'Order already paid and confirmed',
+          data: order,
+        });
+      }
+      order.paymentStatus = 'paid';
+      order.orderStatus = 'confirmed';
+      order.razorpay.paymentId = razorpay_payment_id;
+      order.razorpay.signature = razorpay_signature;
+      await order.save();
+    } else {
+      // 2. Retrieve verified CheckoutSession
+      const session = await CheckoutSession.findOne({ razorpayOrderId: razorpay_order_id });
 
-    if (order.paymentStatus === 'paid') {
-      return res.status(200).json({
-        status: true,
-        message: 'Order already paid and confirmed',
-        data: order,
+      let finalItems = [];
+      let finalShippingAddress = null;
+      let finalSubtotal = 0;
+      let finalShippingCost = 0;
+      let finalDiscount = 0;
+      let finalTotal = 0;
+      let finalPromo = '';
+      let finalOrderNumber = orderNumber || generateOrderNumber();
+      let finalNotes = notes || '';
+
+      if (session) {
+        finalItems = session.items;
+        finalShippingAddress = session.shippingAddress;
+        finalSubtotal = session.subtotal;
+        finalShippingCost = session.shippingCost;
+        finalDiscount = session.discount;
+        finalTotal = session.total;
+        finalPromo = session.promoCode;
+        finalOrderNumber = session.orderNumber || finalOrderNumber;
+        finalNotes = session.notes || finalNotes;
+      } else if (Array.isArray(items) && items.length > 0 && shippingAddress) {
+        // Fallback: recalculate totals directly from request body
+        const calculated = await calculateOrderTotals(items, promoCode, req.user._id);
+        finalItems = calculated.verifiedItems;
+        finalShippingAddress = shippingAddress;
+        finalSubtotal = calculated.subtotal;
+        finalShippingCost = calculated.shippingCost;
+        finalDiscount = calculated.discount;
+        finalTotal = calculated.total;
+        finalPromo = calculated.promoCode;
+      } else {
+        return res.status(404).json({
+          status: false,
+          message: 'Checkout session expired or not found. Please contact support with payment ID: ' + razorpay_payment_id,
+        });
+      }
+
+      // 3. Atomically create the confirmed Order in MongoDB
+      order = await Order.create({
+        orderNumber: finalOrderNumber,
+        user: req.user._id,
+        items: finalItems,
+        shippingAddress: {
+          fullName: finalShippingAddress.fullName || req.user.name || 'Customer',
+          phone: finalShippingAddress.phone || req.user.phone || '',
+          street: finalShippingAddress.street || '',
+          apartment: finalShippingAddress.apartment || '',
+          city: finalShippingAddress.city || '',
+          state: finalShippingAddress.state || '',
+          postalCode: finalShippingAddress.postalCode || '',
+          country: finalShippingAddress.country || 'India',
+          addressType: finalShippingAddress.addressType || 'home',
+        },
+        paymentMethod: 'upi',
+        paymentStatus: 'paid',
+        orderStatus: 'confirmed',
+        subtotal: finalSubtotal,
+        shippingCost: finalShippingCost,
+        discount: finalDiscount,
+        promoCode: finalPromo,
+        total: finalTotal,
+        currency: 'INR',
+        trackingNumber: `SMLX-EXP-${Math.floor(100000000 + Math.random() * 900000000)}`,
+        notes: finalNotes,
+        razorpay: {
+          orderId: razorpay_order_id,
+          paymentId: razorpay_payment_id,
+          signature: razorpay_signature,
+        },
       });
-    }
 
-    // Update the existing Order in MongoDB
-    order.paymentStatus = 'paid';
-    order.orderStatus = 'confirmed';
-    order.trackingNumber = `SMLX-EXP-${Math.floor(100000000 + Math.random() * 900000000)}`;
-    order.razorpay.paymentId = razorpay_payment_id;
-    order.razorpay.signature = razorpay_signature;
-    
-    await order.save();
+      // Cleanup checkout session
+      if (session) {
+        await CheckoutSession.deleteOne({ _id: session._id }).catch(() => {});
+      }
+    }
 
     // Clear user's bag in MongoDB
     try {
@@ -313,9 +385,9 @@ export const verifyPayment = async (req, res) => {
       console.warn('Could not clear bag after order confirmation:', cartErr.message);
     }
 
-    // 1. Dispatch Customer Order Confirmation & Receipt Email (No tracking links)
+    // 1. Dispatch Customer Order Confirmation & Receipt Email
     try {
-      const customerEmail = req.user.email || shippingAddress?.email;
+      const customerEmail = req.user.email || shippingAddress?.email || order.shippingAddress?.email;
       if (customerEmail) {
         const emailHtml = orderConfirmationTemplate({
           order,
@@ -391,32 +463,56 @@ export const handleRazorpayPostCallback = async (req, res) => {
       return res.redirect(`${frontendUrl}/checkout?payment_status=failed&reason=signature_mismatch`);
     }
 
-    // Find the pending order
-    const order = await Order.findOne({ 'razorpay.orderId': razorpay_order_id }).populate('user');
+    // Check if order already exists in MongoDB
+    let order = await Order.findOne({ 'razorpay.orderId': razorpay_order_id }).populate('user');
     
     if (!order) {
-      return res.redirect(`${frontendUrl}/checkout?payment_status=failed&reason=order_not_found`);
-    }
-    
-    // Check if already paid to prevent double processing
-    if (order.paymentStatus === 'paid') {
-      return res.redirect(`${frontendUrl}/checkout?payment_status=success`);
-    }
+      // Find the pending checkout session
+      const session = await CheckoutSession.findOne({ razorpayOrderId: razorpay_order_id });
+      if (session) {
+        order = await Order.create({
+          orderNumber: session.orderNumber,
+          user: session.user,
+          items: session.items,
+          shippingAddress: session.shippingAddress,
+          paymentMethod: 'upi',
+          paymentStatus: 'paid',
+          orderStatus: 'confirmed',
+          subtotal: session.subtotal,
+          shippingCost: session.shippingCost,
+          discount: session.discount,
+          promoCode: session.promoCode,
+          total: session.total,
+          currency: session.currency || 'INR',
+          trackingNumber: `SMLX-EXP-${Math.floor(100000000 + Math.random() * 900000000)}`,
+          notes: session.notes || '',
+          razorpay: {
+            orderId: razorpay_order_id,
+            paymentId: razorpay_payment_id,
+            signature: razorpay_signature,
+          },
+        });
 
-    // Update the order
-    order.paymentStatus = 'paid';
-    order.orderStatus = 'confirmed';
-    order.trackingNumber = `SMLX-EXP-${Math.floor(100000000 + Math.random() * 900000000)}`;
-    order.razorpay.paymentId = razorpay_payment_id;
-    order.razorpay.signature = razorpay_signature;
-    
-    await order.save();
+        await CheckoutSession.deleteOne({ _id: session._id }).catch(() => {});
+      } else {
+        return res.redirect(`${frontendUrl}/checkout?payment_status=failed&reason=order_not_found`);
+      }
+    } else if (order.paymentStatus !== 'paid') {
+      order.paymentStatus = 'paid';
+      order.orderStatus = 'confirmed';
+      order.razorpay.paymentId = razorpay_payment_id;
+      order.razorpay.signature = razorpay_signature;
+      await order.save();
+    }
     
     // Clear user's bag in MongoDB
-    try {
-      await Cart.findOneAndUpdate({ user: order.user._id }, { items: [] });
-    } catch (cartErr) {
-      console.warn('Could not clear bag after order confirmation:', cartErr.message);
+    if (order.user) {
+      try {
+        const uId = order.user._id || order.user;
+        await Cart.findOneAndUpdate({ user: uId }, { items: [] });
+      } catch (cartErr) {
+        console.warn('Could not clear bag after order confirmation:', cartErr.message);
+      }
     }
 
     // 1. Dispatch Customer Order Confirmation & Receipt Email
@@ -453,7 +549,7 @@ export const handleRazorpayPostCallback = async (req, res) => {
       console.error('[Admin Order Alert Dispatch Error]:', adminEmailErr.message);
     }
 
-    return res.redirect(`${frontendUrl}/checkout?payment_status=success`);
+    return res.redirect(`${frontendUrl}/checkout?payment_status=success&order_number=${order.orderNumber}`);
   } catch (error) {
     console.error('[Razorpay Callback Error]:', error);
     const frontendUrl = process.env.FRONTEND_URL || 'https://murarisglamandglow.com';
@@ -481,7 +577,10 @@ export const createCodOrder = async (req, res) => {
  */
 export const getMyOrders = async (req, res) => {
   try {
-    const orders = await Order.find({ user: req.user._id }).sort({ createdAt: -1 });
+    const orders = await Order.find({
+      user: req.user._id,
+      paymentStatus: { $in: ['paid', 'refunded'] },
+    }).sort({ createdAt: -1 });
     return res.status(200).json({
       status: true,
       count: orders.length,
@@ -646,6 +745,8 @@ export const getAllOrders = async (req, res) => {
     }
     if (paymentStatus && paymentStatus !== 'all') {
       query.paymentStatus = paymentStatus;
+    } else if (!paymentStatus) {
+      query.paymentStatus = { $ne: 'pending' };
     }
     if (paymentMethod && paymentMethod !== 'all') {
       query.paymentMethod = paymentMethod;
