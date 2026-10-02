@@ -434,6 +434,165 @@ export const verifyPayment = async (req, res) => {
 };
 
 /**
+ * @desc    Check and reconcile checkout session payment directly with Razorpay Gateway
+ * @route   POST /api/orders/check-session-payment
+ * @access  Private
+ */
+export const checkSessionPayment = async (req, res) => {
+  try {
+    const { razorpayOrderId, orderNumber } = req.body;
+
+    if (!razorpayOrderId) {
+      return res.status(400).json({ status: false, message: 'razorpayOrderId is required' });
+    }
+
+    // 1. Check if Order already created & confirmed in MongoDB
+    let order = await Order.findOne({ 'razorpay.orderId': razorpayOrderId }).populate('user');
+    if (order && order.paymentStatus === 'paid') {
+      return res.status(200).json({
+        status: true,
+        isPaid: true,
+        message: 'Order is confirmed',
+        data: order,
+      });
+    }
+
+    // 2. Query Razorpay API directly to verify whether payment was completed
+    let successfulPayment = null;
+    try {
+      const razorpay = getRazorpayInstance();
+      const paymentsList = await razorpay.orders.fetchPayments(razorpayOrderId);
+      successfulPayment = (paymentsList?.items || []).find(
+        (p) => p.status === 'captured' || p.status === 'authorized'
+      );
+    } catch (fetchErr) {
+      console.warn('[Check Session] Could not fetch payments from Razorpay:', fetchErr.message);
+    }
+
+    if (!successfulPayment) {
+      return res.status(200).json({
+        status: true,
+        isPaid: false,
+        message: 'Payment has not been completed yet',
+      });
+    }
+
+    // 3. Payment confirmed by Razorpay! Fetch CheckoutSession
+    const session = await CheckoutSession.findOne({ razorpayOrderId });
+    let finalOrderNumber = orderNumber || session?.orderNumber || generateOrderNumber();
+
+    if (!order) {
+      if (session) {
+        order = await Order.create({
+          orderNumber: finalOrderNumber,
+          user: session.user || req.user._id,
+          items: session.items,
+          shippingAddress: session.shippingAddress,
+          paymentMethod: 'upi',
+          paymentStatus: 'paid',
+          orderStatus: 'confirmed',
+          subtotal: session.subtotal,
+          shippingCost: session.shippingCost,
+          discount: session.discount,
+          promoCode: session.promoCode,
+          total: session.total,
+          currency: session.currency || 'INR',
+          trackingNumber: `SMLX-EXP-${Math.floor(100000000 + Math.random() * 900000000)}`,
+          notes: session.notes || '',
+          razorpay: {
+            orderId: razorpayOrderId,
+            paymentId: successfulPayment.id,
+            signature: 'direct_gateway_verified',
+          },
+        });
+      } else {
+        // Fallback: recover using active user cart or basic payload
+        const userCart = await Cart.findOne({ user: req.user._id }).populate('items.product');
+        const calculated = await calculateOrderTotals(
+          userCart?.items?.map((it) => ({ ...it.toObject(), id: it.product?._id })) || [],
+          '',
+          req.user._id
+        ).catch(() => null);
+
+        const primaryAddress = (req.user.addresses || []).find((a) => a.isDefault) || (req.user.addresses || [])[0] || {};
+
+        order = await Order.create({
+          orderNumber: finalOrderNumber,
+          user: req.user._id,
+          items: calculated?.verifiedItems || [],
+          shippingAddress: {
+            fullName: primaryAddress.fullName || req.user.name || 'Customer',
+            phone: primaryAddress.phone || req.user.phone || '',
+            street: primaryAddress.street || 'Address on file',
+            apartment: primaryAddress.apartment || '',
+            city: primaryAddress.city || 'City',
+            state: primaryAddress.state || '',
+            postalCode: primaryAddress.postalCode || '500001',
+            country: primaryAddress.country || 'India',
+            addressType: primaryAddress.addressType || 'home',
+          },
+          paymentMethod: 'upi',
+          paymentStatus: 'paid',
+          orderStatus: 'confirmed',
+          subtotal: successfulPayment.amount / 100,
+          shippingCost: 0,
+          discount: 0,
+          promoCode: '',
+          total: successfulPayment.amount / 100,
+          currency: 'INR',
+          trackingNumber: `SMLX-EXP-${Math.floor(100000000 + Math.random() * 900000000)}`,
+          notes: 'Auto-reconciled on mobile app return',
+          razorpay: {
+            orderId: razorpayOrderId,
+            paymentId: successfulPayment.id,
+            signature: 'direct_gateway_verified',
+          },
+        });
+      }
+
+      if (session) {
+        await CheckoutSession.deleteOne({ _id: session._id }).catch(() => {});
+      }
+    } else {
+      order.paymentStatus = 'paid';
+      order.orderStatus = 'confirmed';
+      order.razorpay.paymentId = successfulPayment.id;
+      await order.save();
+    }
+
+    // Clear cart in MongoDB
+    try {
+      await Cart.findOneAndUpdate({ user: req.user._id }, { items: [] });
+    } catch (e) {}
+
+    // Send confirmation emails
+    try {
+      const customerEmail = req.user.email || order.shippingAddress?.email;
+      if (customerEmail) {
+        sendEmail({
+          to: customerEmail,
+          subject: `Order Confirmed! #${order.orderNumber} - Murari's Glam & Glow`,
+          html: orderConfirmationTemplate({ order, customer: req.user }),
+        }).catch(() => {});
+      }
+    } catch (e) {}
+
+    return res.status(200).json({
+      status: true,
+      isPaid: true,
+      message: 'Payment confirmed and order placed successfully',
+      data: order,
+    });
+  } catch (error) {
+    console.error('[Check Session Payment Error]:', error);
+    return res.status(500).json({
+      status: false,
+      message: error.message || 'Failed to check payment status',
+    });
+  }
+};
+
+/**
  * @desc    Handle Razorpay POST callback for mobile redirects
  * @route   POST /api/orders/razorpay-callback
  * @access  Public

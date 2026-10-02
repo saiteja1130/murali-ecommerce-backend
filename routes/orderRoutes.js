@@ -2,6 +2,7 @@ import express from 'express';
 import {
   createRazorpayOrder,
   verifyPayment,
+  checkSessionPayment,
   handleRazorpayPostCallback,
   createCodOrder,
   getMyOrders,
@@ -21,6 +22,7 @@ router.post('/razorpay-callback', handleRazorpayPostCallback);
 // Customer Order Lifecycle
 router.post('/create-razorpay-order', protect, createRazorpayOrder);
 router.post('/verify-payment', protect, verifyPayment);
+router.post('/check-session-payment', protect, checkSessionPayment);
 router.post('/cod', protect, createCodOrder);
 router.get('/my-orders', protect, getMyOrders);
 router.get('/:id', protect, getOrderById);
