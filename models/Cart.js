@@ -20,6 +20,16 @@ const cartItemSchema = new mongoose.Schema(
       name: { type: String, default: 'Standard' },
       hex: { type: String, default: '#1D241C' },
     },
+    variantId: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    sku: {
+      type: String,
+      default: '',
+      trim: true,
+    },
     image: {
       type: String,
       default: '',

@@ -57,7 +57,25 @@ const calculateOrderTotals = async (rawItems, promoCodeInput, userId = null) => 
       throw new Error(`Product "${product.name}" is currently out of stock`);
     }
 
-    const price = Number(product.price) || 0;
+    // Check variant-specific price & SKU
+    let price = Number(product.price) || 0;
+    let itemSku = item.sku || product.sku || '';
+    const variantId = item.variantId || '';
+
+    if (variantId && Array.isArray(product.variants)) {
+      const foundVariant = product.variants.find(
+        (v) => (v._id && v._id.toString() === variantId.toString()) || v.sku === item.sku
+      );
+      if (foundVariant) {
+        if (typeof foundVariant.price === 'number' && foundVariant.price > 0) {
+          price = foundVariant.price;
+        }
+        if (foundVariant.sku) {
+          itemSku = foundVariant.sku;
+        }
+      }
+    }
+
     const itemTotal = price * quantity;
     subtotal += itemTotal;
 
@@ -82,13 +100,14 @@ const calculateOrderTotals = async (rawItems, promoCodeInput, userId = null) => 
 
     verifiedItems.push({
       product: product._id,
+      variantId,
       name: product.name,
       price: price,
       quantity: quantity,
       selectedSize: item.selectedSize || 'Standard',
       selectedColor: selectedColor,
       image: primaryImage,
-      sku: product.sku || '',
+      sku: itemSku,
     });
   }
 
@@ -869,7 +888,13 @@ export const getMyOrders = async (req, res) => {
     const orders = await Order.find({
       user: req.user._id,
       paymentStatus: { $in: ['paid', 'cod_pending', 'refunded'] },
-    }).sort({ createdAt: -1 });
+    })
+      .populate({
+        path: 'items.product',
+        select: 'name slug images colorImages variants category sku',
+        populate: { path: 'category', select: 'name slug' },
+      })
+      .sort({ createdAt: -1 });
     return res.status(200).json({
       status: true,
       count: orders.length,
@@ -897,11 +922,19 @@ export const getOrderById = async (req, res) => {
     if (id.startsWith('SMLX-')) {
       order = await Order.findOne({ orderNumber: id })
         .populate('user', 'name email phone')
-        .populate('items.product', 'name slug images colorImages variants');
+        .populate({
+          path: 'items.product',
+          select: 'name slug images colorImages variants category sku',
+          populate: { path: 'category', select: 'name slug' },
+        });
     } else {
       order = await Order.findById(id)
         .populate('user', 'name email phone')
-        .populate('items.product', 'name slug images colorImages variants');
+        .populate({
+          path: 'items.product',
+          select: 'name slug images colorImages variants category sku',
+          populate: { path: 'category', select: 'name slug' },
+        });
     }
 
     if (!order) {
@@ -1060,6 +1093,11 @@ export const getAllOrders = async (req, res) => {
     const total = await Order.countDocuments(query);
     const orders = await Order.find(query)
       .populate('user', 'name email phone')
+      .populate({
+        path: 'items.product',
+        select: 'name slug images colorImages variants category sku',
+        populate: { path: 'category', select: 'name slug' },
+      })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limitNum);

@@ -28,10 +28,29 @@ const formatCartResponse = (cartDoc) => {
 
       const itemImg = matchedColorImg || item.image || prod.images?.[0] || 'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?q=80&w=900';
 
+      // Check for variant-specific price / sku
+      let itemPrice = price;
+      let itemSku = item.sku || prod.sku;
+      if (item.variantId && Array.isArray(prod.variants)) {
+        const foundVariant = prod.variants.find(
+          (v) => (v._id && v._id.toString() === item.variantId) || v.sku === item.sku
+        );
+        if (foundVariant) {
+          if (typeof foundVariant.price === 'number' && foundVariant.price > 0) {
+            itemPrice = foundVariant.price;
+          }
+          if (foundVariant.sku) {
+            itemSku = foundVariant.sku;
+          }
+        }
+      }
+
       return {
         id: item.cartItemId,
         cartItemId: item.cartItemId,
         _id: item._id,
+        variantId: item.variantId || '',
+        sku: itemSku,
         quantity: item.quantity,
         selectedSize: item.selectedSize || 'Standard',
         selectedColor: item.selectedColor || { name: 'Standard', hex: '#1D241C' },
@@ -41,8 +60,8 @@ const formatCartResponse = (cartDoc) => {
           _id: prod._id,
           name: prod.name,
           slug: prod.slug,
-          sku: prod.sku,
-          price: price,
+          sku: itemSku,
+          price: itemPrice,
           originalPrice: prod.originalPrice,
           image: itemImg,
           images: prod.images || [],
@@ -99,7 +118,7 @@ export const getCart = async (req, res, next) => {
  */
 export const addToCart = async (req, res, next) => {
   try {
-    const { productId, selectedSize, selectedColor, quantity = 1 } = req.body;
+    const { productId, selectedSize, selectedColor, quantity = 1, variantId, sku } = req.body;
 
     if (!productId) {
       return res.status(400).json({ status: false, message: 'Product ID is required' });
@@ -120,7 +139,39 @@ export const addToCart = async (req, res, next) => {
         ? { name: selectedColor, hex: '#1D241C' }
         : selectedColor || { name: 'Standard', hex: '#1D241C' };
 
-    const cartItemId = `${product._id}-${size}-${color.name || 'Standard'}`;
+    // Resolve matching variant if product has variants
+    let matchedVariant = null;
+    if (variantId && Array.isArray(product.variants)) {
+      matchedVariant = product.variants.find(
+        (v) => (v._id && v._id.toString() === variantId.toString()) || v.sku === variantId
+      );
+    }
+    if (!matchedVariant && Array.isArray(product.variants) && product.variants.length > 0) {
+      if (sku) {
+        matchedVariant = product.variants.find((v) => v.sku === sku);
+      } else {
+        const targetColorName = (color.name || color || '').trim().toLowerCase();
+        const targetSize = (size || '').trim().toLowerCase();
+        matchedVariant = product.variants.find((v) => {
+          const vColor = (v.color || '').trim().toLowerCase();
+          const vSize = (v.size || '').trim().toLowerCase();
+          const colorMatches = !vColor || !targetColorName || targetColorName === 'standard' || vColor === targetColorName;
+          const sizeMatches = !vSize || !targetSize || targetSize === 'standard' || targetSize === 'one size' || vSize === targetSize;
+          return colorMatches && sizeMatches;
+        });
+      }
+    }
+
+    const resolvedVariantId = variantId || (matchedVariant && matchedVariant._id ? matchedVariant._id.toString() : '');
+    const resolvedSku = sku || (matchedVariant ? matchedVariant.sku : '') || product.sku || '';
+
+    // Calculate unambiguous cartItemId
+    const cartItemId = resolvedVariantId
+      ? `${product._id}-${resolvedVariantId}`
+      : (resolvedSku && resolvedSku !== product.sku
+          ? `${product._id}-${resolvedSku}`
+          : `${product._id}-${size}-${color.name || 'Standard'}`);
+
     const qty = Math.max(1, parseInt(quantity, 10) || 1);
 
     // Resolve color image
@@ -141,12 +192,22 @@ export const addToCart = async (req, res, next) => {
       cart = new Cart({ user: req.user._id, items: [] });
     }
 
-    const existingIndex = cart.items.findIndex((item) => item.cartItemId === cartItemId);
+    const existingIndex = cart.items.findIndex(
+      (item) =>
+        item.cartItemId === cartItemId ||
+        (resolvedVariantId && item.variantId === resolvedVariantId)
+    );
 
     if (existingIndex > -1) {
       cart.items[existingIndex].quantity += qty;
       if (!cart.items[existingIndex].image && itemImage) {
         cart.items[existingIndex].image = itemImage;
+      }
+      if (!cart.items[existingIndex].variantId && resolvedVariantId) {
+        cart.items[existingIndex].variantId = resolvedVariantId;
+      }
+      if (!cart.items[existingIndex].sku && resolvedSku) {
+        cart.items[existingIndex].sku = resolvedSku;
       }
     } else {
       cart.items.push({
@@ -154,6 +215,8 @@ export const addToCart = async (req, res, next) => {
         product: product._id,
         selectedSize: size,
         selectedColor: color,
+        variantId: resolvedVariantId,
+        sku: resolvedSku,
         image: itemImage,
         quantity: qty,
       });
@@ -197,9 +260,13 @@ export const updateCartQuantity = async (req, res, next) => {
     const newQty = parseInt(quantity, 10);
 
     if (newQty <= 0) {
-      cart.items = cart.items.filter((item) => item.cartItemId !== cartItemId);
+      cart.items = cart.items.filter(
+        (item) => item.cartItemId !== cartItemId && item._id.toString() !== cartItemId
+      );
     } else {
-      const item = cart.items.find((item) => item.cartItemId === cartItemId);
+      const item = cart.items.find(
+        (item) => item.cartItemId === cartItemId || item._id.toString() === cartItemId
+      );
       if (item) {
         item.quantity = newQty;
       }
@@ -236,7 +303,9 @@ export const removeCartItem = async (req, res, next) => {
       return res.status(404).json({ status: false, message: 'Cart not found' });
     }
 
-    cart.items = cart.items.filter((item) => item.cartItemId !== cartItemId);
+    cart.items = cart.items.filter(
+      (item) => item.cartItemId !== cartItemId && item._id.toString() !== cartItemId
+    );
     await cart.save();
 
     const populatedCart = await Cart.findById(cart._id).populate({
