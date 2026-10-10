@@ -33,6 +33,8 @@ export const updateSettings = async (req, res, next) => {
       isPromoActive,
       currency,
       storeName,
+      isCodEnabled,
+      maxCodAmount,
     } = req.body;
 
     let settings = await Settings.getSingleton();
@@ -44,6 +46,8 @@ export const updateSettings = async (req, res, next) => {
     if (isPromoActive !== undefined) settings.isPromoActive = isPromoActive === 'true' || isPromoActive === true;
     if (currency !== undefined) settings.currency = currency;
     if (storeName !== undefined) settings.storeName = storeName;
+    if (isCodEnabled !== undefined) settings.isCodEnabled = isCodEnabled === 'true' || isCodEnabled === true;
+    if (maxCodAmount !== undefined) settings.maxCodAmount = Math.max(0, Number(maxCodAmount));
 
     await settings.save();
 

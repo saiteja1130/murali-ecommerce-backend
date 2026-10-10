@@ -722,11 +722,141 @@ export const handleRazorpayPostCallback = async (req, res) => {
  * @access  Private
  */
 export const createCodOrder = async (req, res) => {
-  return res.status(400).json({
-    status: false,
-    message:
-      'Cash on Delivery is currently not offered. Please complete your purchase using our secure online payment methods (UPI, Cards, Net Banking).',
-  });
+  try {
+    const { items, shippingAddress, promoCode, notes } = req.body;
+
+    // 1. Verify store settings: check if COD is enabled
+    const settings = await Settings.getSingleton();
+    if (settings.isCodEnabled === false) {
+      return res.status(400).json({
+        status: false,
+        message: 'Cash on Delivery is currently disabled. Please complete your purchase using an online payment method.',
+      });
+    }
+
+    // 2. Validate items
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({
+        status: false,
+        message: 'Your bag is empty. Please add items before placing an order.',
+      });
+    }
+
+    // 3. Validate shipping address completeness
+    if (
+      !shippingAddress ||
+      !shippingAddress.street ||
+      !shippingAddress.city ||
+      !shippingAddress.postalCode
+    ) {
+      return res.status(400).json({
+        status: false,
+        message: 'Please provide a complete shipping address (street, city, and PIN code are required).',
+      });
+    }
+
+    // 4. Calculate verified server-side totals
+    const calculated = await calculateOrderTotals(items, promoCode, req.user._id);
+
+    // 5. Validate COD limit if set
+    if (settings.maxCodAmount && calculated.total > settings.maxCodAmount) {
+      return res.status(400).json({
+        status: false,
+        message: `Cash on Delivery is only available for orders up to ₹${Number(settings.maxCodAmount).toLocaleString('en-IN')}. Please choose UPI or Cards for higher value purchases.`,
+      });
+    }
+
+    // 6. Generate order numbers
+    const orderNumber = generateOrderNumber();
+    const trackingNumber = `SMLX-EXP-${Math.floor(100000000 + Math.random() * 900000000)}`;
+
+    // 7. Create confirmed Order in MongoDB
+    const order = await Order.create({
+      orderNumber,
+      user: req.user._id,
+      items: calculated.verifiedItems,
+      shippingAddress: {
+        fullName: shippingAddress.fullName || req.user.name || 'Customer',
+        phone: shippingAddress.phone || req.user.phone || '',
+        street: shippingAddress.street || '',
+        apartment: shippingAddress.apartment || '',
+        city: shippingAddress.city || '',
+        state: shippingAddress.state || '',
+        postalCode: shippingAddress.postalCode || '',
+        country: shippingAddress.country || 'India',
+        addressType: shippingAddress.addressType || 'home',
+      },
+      paymentMethod: 'cod',
+      paymentStatus: 'cod_pending',
+      orderStatus: 'confirmed',
+      subtotal: calculated.subtotal,
+      shippingCost: calculated.shippingCost,
+      discount: calculated.discount,
+      promoCode: calculated.promoCode,
+      total: calculated.total,
+      currency: 'INR',
+      trackingNumber,
+      notes: notes || '',
+      razorpay: {
+        orderId: '',
+        paymentId: '',
+        signature: '',
+      },
+    });
+
+    // 8. Clear user's bag in MongoDB
+    try {
+      await Cart.findOneAndUpdate({ user: req.user._id }, { items: [] });
+    } catch (cartErr) {
+      console.warn('Could not clear bag after COD order confirmation:', cartErr.message);
+    }
+
+    // 9. Dispatch Customer Order Confirmation & Receipt Email
+    try {
+      const customerEmail = req.user.email || shippingAddress?.email || order.shippingAddress?.email;
+      if (customerEmail) {
+        const emailHtml = orderConfirmationTemplate({
+          order,
+          customer: req.user,
+        });
+        sendEmail({
+          to: customerEmail,
+          subject: `Order Confirmed! #${order.orderNumber} - Murari's Glam & Glow`,
+          html: emailHtml,
+        }).catch((err) => console.error('[Order Confirmation Email Error]:', err.message));
+      }
+    } catch (emailErr) {
+      console.error('[Order Confirmation Dispatch Error]:', emailErr.message);
+    }
+
+    // 10. Dispatch Store Admin New Order Notification
+    try {
+      const adminEmail = process.env.ADMIN_EMAIL || 'murariglamandglow@gmail.com';
+      const adminHtml = adminOrderAlertTemplate({
+        order,
+        customer: req.user,
+      });
+      sendEmail({
+        to: adminEmail,
+        subject: `[New COD Order Alert] #${order.orderNumber} - ₹${Number(order.total || 0).toFixed(2)} (Cash on Delivery)`,
+        html: adminHtml,
+      }).catch((err) => console.error('[Admin Order Alert Email Error]:', err.message));
+    } catch (adminEmailErr) {
+      console.error('[Admin Order Alert Dispatch Error]:', adminEmailErr.message);
+    }
+
+    return res.status(201).json({
+      status: true,
+      message: 'Cash on Delivery order placed and confirmed successfully',
+      data: order,
+    });
+  } catch (error) {
+    console.error('[Create COD Order Error]:', error);
+    return res.status(500).json({
+      status: false,
+      message: error.message || 'Failed to place Cash on Delivery order',
+    });
+  }
 };
 
 /**
@@ -738,7 +868,7 @@ export const getMyOrders = async (req, res) => {
   try {
     const orders = await Order.find({
       user: req.user._id,
-      paymentStatus: { $in: ['paid', 'refunded'] },
+      paymentStatus: { $in: ['paid', 'cod_pending', 'refunded'] },
     }).sort({ createdAt: -1 });
     return res.status(200).json({
       status: true,
@@ -846,6 +976,8 @@ export const cancelMyOrder = async (req, res) => {
     order.orderStatus = 'cancelled';
     if (order.paymentStatus === 'paid') {
       order.paymentStatus = 'refunded';
+    } else if (order.paymentStatus === 'cod_pending') {
+      order.paymentStatus = 'failed';
     }
     await order.save();
 

@@ -38,6 +38,15 @@ const settingsSchema = new mongoose.Schema(
       type: String,
       default: 'SUMILUX Haute Couture',
     },
+    isCodEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    maxCodAmount: {
+      type: Number,
+      default: 25000,
+      min: 0,
+    },
   },
   {
     timestamps: true,
@@ -54,6 +63,8 @@ settingsSchema.statics.getSingleton = async function () {
       promoCode: 'SUMI15',
       discountPercent: 15,
       isPromoActive: true,
+      isCodEnabled: true,
+      maxCodAmount: 25000,
     });
   }
   return settings;

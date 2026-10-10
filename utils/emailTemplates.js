@@ -162,10 +162,12 @@ export const orderConfirmationTemplate = ({ order, customer }) => {
     `;
   }).join('');
 
+  const isCod = order.paymentMethod === 'cod';
+
   const content = `
     <div style="border-bottom: 1px solid #E8E3DE; padding-bottom: 20px; margin-bottom: 24px;">
-      <span style="display: inline-block; background-color: #E8F5E9; color: #2E7D32; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; padding: 4px 10px; border-radius: 2px; margin-bottom: 10px;">
-        Payment Verified &bull; Order Confirmed
+      <span style="display: inline-block; background-color: ${isCod ? '#E3F2FD' : '#E8F5E9'}; color: ${isCod ? '#1565C0' : '#2E7D32'}; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; padding: 4px 10px; border-radius: 2px; margin-bottom: 10px;">
+        ${isCod ? 'Order Confirmed &bull; Cash on Delivery' : 'Payment Verified &bull; Order Confirmed'}
       </span>
       <h2 style="margin: 0 0 6px 0; font-family: Georgia, serif; font-size: 24px; color: #1A1A1A;">
         Thank You for Your Order
@@ -179,7 +181,7 @@ export const orderConfirmationTemplate = ({ order, customer }) => {
       Dear ${shipping.fullName || customer?.name || 'Customer'},
     </p>
     <p style="margin: 0 0 24px 0; font-size: 14px; line-height: 1.6; color: #4A4A4A;">
-      We are delighted to confirm that your order has been received and is currently being prepared by our fulfillment team. Below are your order details and payment summary.
+      We are delighted to confirm that your order has been received and is currently being prepared by our fulfillment team. ${isCod ? 'Below are your order details and payment due upon delivery.' : 'Below are your order details and payment summary.'}
     </p>
 
     <!-- Ordered Items Table -->
@@ -208,14 +210,14 @@ export const orderConfirmationTemplate = ({ order, customer }) => {
         </td>
       </tr>
       <tr>
-        <td style="padding: 10px 0 4px 0; border-top: 1px solid #E8E3DE; font-size: 14px; font-weight: bold; color: #1A1A1A;">Total Paid:</td>
+        <td style="padding: 10px 0 4px 0; border-top: 1px solid #E8E3DE; font-size: 14px; font-weight: bold; color: #1A1A1A;">${isCod ? 'Total Payable on Delivery:' : 'Total Paid:'}</td>
         <td align="right" style="padding: 10px 0 4px 0; border-top: 1px solid #E8E3DE; font-family: monospace; font-size: 16px; font-weight: bold; color: #1A1A1A;">
           &#8377;${Number(order.total || 0).toFixed(2)}
         </td>
       </tr>
       <tr>
         <td colspan="2" style="padding-top: 6px; font-size: 10px; color: #6B6B6B; font-family: monospace;">
-          Payment Method: 100% Secure Online Payment (UPI / Cards via Razorpay)
+          ${isCod ? 'Payment Method: Cash on Delivery (COD) &bull; Please keep cash or UPI QR ready upon arrival' : 'Payment Method: 100% Secure Online Payment (UPI / Cards via Razorpay)'}
         </td>
       </tr>
     </table>
@@ -268,7 +270,7 @@ export const adminOrderAlertTemplate = ({ order, customer }) => {
       <p style="margin: 0 0 6px 0; font-size: 13px;"><strong>Subtotal:</strong> &#8377;${Number(order.subtotal !== undefined ? order.subtotal : (order.total || 0)).toFixed(2)}</p>
       ${Number(order.discount || 0) > 0 ? `<p style="margin: 0 0 6px 0; font-size: 13px; color: #2E7D32;"><strong>Discount ${order.promoCode ? `(${order.promoCode})` : ''}:</strong> -&#8377;${Number(order.discount).toFixed(2)}</p>` : ''}
       <p style="margin: 0 0 6px 0; font-size: 13px;"><strong>Shipping:</strong> &#8377;${Number(order.shippingCost || 0).toFixed(2)}</p>
-      <p style="margin: 0 0 6px 0; font-size: 13px;"><strong>Total Amount:</strong> &#8377;${Number(order.total || 0).toFixed(2)} (PAID via Razorpay)</p>
+      <p style="margin: 0 0 6px 0; font-size: 13px;"><strong>Total Amount:</strong> &#8377;${Number(order.total || 0).toFixed(2)} ${order.paymentMethod === 'cod' ? '(Cash on Delivery - Payment Pending)' : '(PAID via Razorpay)'}</p>
       <p style="margin: 0 0 6px 0; font-size: 13px;"><strong>Customer Name:</strong> ${shipping.fullName || customer?.name || 'Customer'}</p>
       <p style="margin: 0 0 6px 0; font-size: 13px;"><strong>Customer Email:</strong> ${customer?.email || 'N/A'}</p>
       <p style="margin: 0; font-size: 13px;"><strong>Customer Phone:</strong> ${shipping.phone || customer?.phone || 'N/A'}</p>
