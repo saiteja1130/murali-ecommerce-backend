@@ -27,7 +27,34 @@ const app = express();
 // Trust reverse proxy headers (e.g. Nginx, Cloudflare) for accurate req.protocol
 app.set('trust proxy', 1);
 
-app.use(cors());
+// Explicitly allowed origins (storefront + admin panel)
+const allowedOrigins = [
+  'https://murarisglamandglow.com',
+  'https://www.murarisglamandglow.com',
+  'https://admin.murarisglamandglow.com',
+  'http://localhost:5173',
+  'http://localhost:5174',
+];
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests with no origin (e.g. mobile apps, curl, Postman)
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error(`CORS policy: origin '${origin}' is not allowed`));
+    }
+  },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+  optionsSuccessStatus: 200, // Some legacy browsers (IE11) choke on 204
+};
+
+app.use(cors(corsOptions));
+
+// Explicitly handle preflight OPTIONS requests for all routes
+app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
