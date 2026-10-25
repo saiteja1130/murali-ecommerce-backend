@@ -1,5 +1,8 @@
 import Settings from '../models/Settings.js';
 import Order from '../models/Order.js';
+import Coupon from '../models/Coupon.js';
+import Cart from '../models/Cart.js';
+import { evaluateCouponForItems } from './couponController.js';
 
 /**
  * @desc    Get store settings (shipping, threshold, promo)
@@ -68,7 +71,7 @@ export const updateSettings = async (req, res, next) => {
  */
 export const validatePromoCode = async (req, res, next) => {
   try {
-    const { code } = req.body;
+    const { code, items } = req.body;
     if (!code || !code.trim()) {
       return res.status(400).json({
         status: false,
@@ -76,11 +79,61 @@ export const validatePromoCode = async (req, res, next) => {
       });
     }
 
-    const settings = await Settings.getSingleton();
     const inputCode = code.trim().toUpperCase();
 
+    // 1. Check Coupon collection first
+    const matchedCoupon = await Coupon.findOne({ code: inputCode, isActive: true }).populate(
+      'applicableCategories',
+      'name slug'
+    );
+
+    if (matchedCoupon) {
+      let cartItems = Array.isArray(items) ? items : [];
+
+      // If items weren't directly provided in request, fetch authenticated user's cart from DB
+      if (cartItems.length === 0 && req.user && req.user._id) {
+        const userCart = await Cart.findOne({ user: req.user._id }).populate({
+          path: 'items.product',
+          populate: [
+            { path: 'category', select: 'name slug' },
+            { path: 'mainCategory', select: 'name slug' },
+          ],
+        });
+        if (userCart && Array.isArray(userCart.items)) {
+          cartItems = userCart.items;
+        }
+      }
+
+      const evalResult = await evaluateCouponForItems({
+        coupon: matchedCoupon,
+        items: cartItems,
+        userId: req.user?._id,
+      });
+
+      if (!evalResult.valid) {
+        return res.status(400).json({
+          status: false,
+          valid: false,
+          alreadyUsed: evalResult.alreadyUsed || false,
+          message: evalResult.message,
+        });
+      }
+
+      return res.status(200).json({
+        status: true,
+        valid: true,
+        code: matchedCoupon.code,
+        discountPercent: evalResult.nominalPercent,
+        discountRate: evalResult.discountRate,
+        discountAmount: evalResult.discountAmount,
+        message: evalResult.message,
+      });
+    }
+
+    // 2. Fallback to Settings.promoCode (e.g. SUMI15)
+    const settings = await Settings.getSingleton();
+
     if (settings.isPromoActive && settings.promoCode && inputCode === settings.promoCode) {
-      // If user is authenticated, verify they haven't already used this coupon
       if (req.user && req.user._id) {
         const previousUsage = await Order.findOne({
           user: req.user._id,
@@ -111,7 +164,7 @@ export const validatePromoCode = async (req, res, next) => {
     return res.status(400).json({
       status: false,
       valid: false,
-      message: `Invalid or expired promotional code. Try using ${settings.promoCode}`,
+      message: `Invalid or expired promotional code. Try using ${settings.promoCode || 'SUMI15'}`,
     });
   } catch (error) {
     next(error);

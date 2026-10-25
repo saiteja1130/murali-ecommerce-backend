@@ -6,6 +6,8 @@ import Product from '../models/Product.js';
 import Settings from '../models/Settings.js';
 import Cart from '../models/Cart.js';
 import User from '../models/User.js';
+import Coupon from '../models/Coupon.js';
+import { evaluateCouponForItems } from './couponController.js';
 import { sendEmail } from '../utils/sendEmail.js';
 import {
   orderConfirmationTemplate,
@@ -42,13 +44,17 @@ const calculateOrderTotals = async (rawItems, promoCodeInput, userId = null) => 
 
   const settings = await Settings.getSingleton();
   const verifiedItems = [];
+  const fetchedProducts = [];
   let subtotal = 0;
 
   for (const item of rawItems) {
     const productId = item.product?._id || item.product?.id || item.product || item.id;
     const quantity = Math.max(1, Number(item.quantity) || 1);
 
-    const product = await Product.findById(productId);
+    const product = await Product.findById(productId)
+      .populate('category', 'name slug')
+      .populate('mainCategory', 'name slug');
+
     if (!product || product.isDeleted) {
       throw new Error(`Product ${item.name || 'item'} is no longer available`);
     }
@@ -109,14 +115,46 @@ const calculateOrderTotals = async (rawItems, promoCodeInput, userId = null) => 
       image: primaryImage,
       sku: itemSku,
     });
+
+    fetchedProducts.push(product);
   }
 
-  // Promo Code Validation (One-time usage check per user)
+  // Promo Code Validation (Category Scoped via Coupon model, with legacy fallback)
   let discount = 0;
   let activePromo = '';
-  if (promoCodeInput && settings.isPromoActive) {
+  let appliedCouponId = null;
+
+  if (promoCodeInput) {
     const cleanPromo = promoCodeInput.trim().toUpperCase();
-    if (cleanPromo === (settings.promoCode || '').toUpperCase()) {
+
+    // 1. Check Coupon collection
+    const matchedCoupon = await Coupon.findOne({ code: cleanPromo, isActive: true }).populate(
+      'applicableCategories',
+      'name slug'
+    );
+
+    if (matchedCoupon) {
+      const itemsForEval = verifiedItems.map((vi, idx) => ({
+        ...vi,
+        product: fetchedProducts[idx],
+      }));
+
+      const evalResult = await evaluateCouponForItems({
+        coupon: matchedCoupon,
+        items: itemsForEval,
+        userId,
+        cartSubtotal: subtotal,
+      });
+
+      if (!evalResult.valid) {
+        throw new Error(evalResult.message);
+      }
+
+      discount = evalResult.discountAmount;
+      activePromo = cleanPromo;
+      appliedCouponId = matchedCoupon._id;
+    } else if (settings.isPromoActive && cleanPromo === (settings.promoCode || '').toUpperCase()) {
+      // 2. Legacy Settings.promoCode fallback
       if (userId) {
         const previousOrder = await Order.findOne({
           user: userId,
@@ -148,8 +186,19 @@ const calculateOrderTotals = async (rawItems, promoCodeInput, userId = null) => 
     shippingCost: Math.round(shippingCost * 100) / 100,
     total: Math.round(total * 100) / 100,
     promoCode: activePromo,
+    appliedCouponId,
     settings,
   };
+};
+
+// Helper to record coupon usage count
+const recordCouponUsage = async (promoCode) => {
+  if (promoCode) {
+    await Coupon.findOneAndUpdate(
+      { code: promoCode.trim().toUpperCase() },
+      { $inc: { usageCount: 1 } }
+    ).catch(() => {});
+  }
 };
 
 /**
@@ -390,6 +439,11 @@ export const verifyPayment = async (req, res) => {
           signature: razorpay_signature,
         },
       });
+
+      // Increment coupon usage count if applied
+      if (finalPromo) {
+        await recordCouponUsage(finalPromo);
+      }
 
       // Cleanup checkout session
       if (session) {
@@ -822,6 +876,11 @@ export const createCodOrder = async (req, res) => {
         signature: '',
       },
     });
+
+    // Increment coupon usage count if applied
+    if (calculated.promoCode) {
+      await recordCouponUsage(calculated.promoCode);
+    }
 
     // 8. Clear user's bag in MongoDB
     try {
