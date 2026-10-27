@@ -1,6 +1,7 @@
 import Coupon from '../models/Coupon.js';
 import Category from '../models/Category.js';
 import Order from '../models/Order.js';
+import Settings from '../models/Settings.js';
 
 /**
  * @desc    Get all coupons (Admin)
@@ -470,3 +471,51 @@ export const evaluateCouponForItems = async ({
     message: successMessage,
   };
 };
+
+/**
+ * @desc    Get latest active coupon for mobile & storefront announcement banners
+ * @route   GET /api/coupons/latest
+ * @access  Public
+ */
+export const getLatestActiveCoupon = async (req, res, next) => {
+  try {
+    const now = new Date();
+    // Query the latest active coupon where endDate is null or in the future
+    const latestCoupon = await Coupon.findOne({
+      isActive: true,
+      $or: [{ endDate: null }, { endDate: { $gt: now } }],
+    })
+      .sort({ createdAt: -1 })
+      .select('code description discountType discountValue minSpend maxDiscount startDate endDate isActive');
+
+    if (latestCoupon) {
+      return res.status(200).json({
+        status: true,
+        data: latestCoupon,
+      });
+    }
+
+    // Fallback to store settings promoCode
+    const settings = await Settings.getSingleton();
+    if (settings && settings.isPromoActive && settings.promoCode) {
+      return res.status(200).json({
+        status: true,
+        data: {
+          code: settings.promoCode,
+          discountType: 'percentage',
+          discountValue: settings.discountPercent,
+          minSpend: settings.freeShippingThreshold || 0,
+          isActive: settings.isPromoActive,
+        },
+      });
+    }
+
+    return res.status(200).json({
+      status: true,
+      data: null,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+

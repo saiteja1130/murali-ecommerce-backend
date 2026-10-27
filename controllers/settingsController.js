@@ -12,9 +12,24 @@ import { evaluateCouponForItems } from './couponController.js';
 export const getSettings = async (req, res, next) => {
   try {
     const settings = await Settings.getSingleton();
+    const settingsData = settings.toObject ? settings.toObject() : { ...settings };
+
+    // Find latest active coupon from Coupon collection if exists
+    const now = new Date();
+    const latestCoupon = await Coupon.findOne({
+      isActive: true,
+      $or: [{ endDate: null }, { endDate: { $gt: now } }],
+    })
+      .sort({ createdAt: -1 })
+      .select('code description discountType discountValue minSpend maxDiscount startDate endDate isActive');
+
+    if (latestCoupon) {
+      settingsData.latestCoupon = latestCoupon;
+    }
+
     res.status(200).json({
       status: true,
-      data: settings,
+      data: settingsData,
     });
   } catch (error) {
     next(error);
